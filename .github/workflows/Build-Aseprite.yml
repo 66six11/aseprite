@@ -1,0 +1,208 @@
+name: Build Aseprite
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # 允许手动触发工作流
+
+env:
+  SKIA_VERSION: 'aseprite-m124'  # 指定 Skia 版本
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install Windows dependencies
+      run: |
+        choco install cmake ninja -y
+
+    - name: Download Skia for Windows
+      run: |
+        $skiaUrl = "https://github.com/aseprite/skia/releases/download/$env:SKIA_VERSION/Skia-Windows-Release-x64.zip"
+        Invoke-WebRequest -Uri $skiaUrl -OutFile "skia-windows.zip"
+        New-Item -ItemType Directory -Path "deps" -Force
+        Expand-Archive -Path "skia-windows.zip" -DestinationPath "deps/skia"
+
+    - name: Configure CMake
+      run: |
+        New-Item -ItemType Directory -Path "build" -Force
+        cd build
+        cmake -G Ninja `
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+          -DLAF_BACKEND=skia `
+          -DSKIA_DIR="${{ github.workspace }}/deps/skia" `
+          -DSKIA_LIBRARY_DIR="${{ github.workspace }}/deps/skia/out/Release-x64" `
+          -DSKIA_LIBRARY="${{ github.workspace }}/deps/skia/out/Release-x64/skia.lib" `
+          ..
+
+    - name: Build with Ninja
+      run: |
+        cd build
+        ninja aseprite
+
+    - name: Upload Windows artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: aseprite-windows
+        path: build/bin/aseprite.exe
+
+  build-macos-intel:
+    runs-on: macos-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install macOS dependencies
+      run: |
+        brew install cmake ninja
+
+    - name: Download Skia for macOS (Intel)
+      run: |
+        curl -L "https://github.com/aseprite/skia/releases/download/$SKIA_VERSION/Skia-macOS-Release-x64.zip" -o skia-macos.zip
+        mkdir -p deps/skia
+        unzip skia-macos.zip -d deps/skia
+
+    - name: Configure CMake for Intel
+      run: |
+        mkdir build
+        cd build
+        cmake -G Ninja \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=10.9 \
+          -DLAF_BACKEND=skia \
+          -DSKIA_DIR=$GITHUB_WORKSPACE/deps/skia \
+          -DSKIA_LIBRARY_DIR=$GITHUB_WORKSPACE/deps/skia/out/Release-x64 \
+          -DSKIA_LIBRARY=$GITHUB_WORKSPACE/deps/skia/out/Release-x64/libskia.a \
+          ..
+
+    - name: Build with Ninja
+      run: |
+        cd build
+        ninja aseprite
+
+    - name: Upload macOS Intel artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: aseprite-macos-intel
+        path: build/bin/aseprite
+
+  build-macos-arm:
+    runs-on: macos-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install macOS dependencies
+      run: |
+        brew install cmake ninja
+
+    - name: Download Skia for macOS (ARM)
+      run: |
+        curl -L "https://github.com/aseprite/skia/releases/download/$SKIA_VERSION/Skia-macOS-Release-arm64.zip" -o skia-macos-arm.zip
+        mkdir -p deps/skia
+        unzip skia-macos-arm.zip -d deps/skia
+
+    - name: Configure CMake for ARM
+      run: |
+        mkdir build
+        cd build
+        cmake -G Ninja \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_OSX_ARCHITECTURES=arm64 \
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+          -DLAF_BACKEND=skia \
+          -DSKIA_DIR=$GITHUB_WORKSPACE/deps/skia \
+          -DSKIA_LIBRARY_DIR=$GITHUB_WORKSPACE/deps/skia/out/Release-arm64 \
+          -DSKIA_LIBRARY=$GITHUB_WORKSPACE/deps/skia/out/Release-arm64/libskia.a \
+          -DPNG_ARM_NEON=on \
+          ..
+
+    - name: Build with Ninja
+      run: |
+        cd build
+        ninja aseprite
+
+    - name: Upload macOS ARM artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: aseprite-macos-arm
+        path: build/bin/aseprite
+
+  build-linux:
+    runs-on: ubuntu-20.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install Linux dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang cmake ninja-build libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev libfontconfig1-dev
+
+    - name: Download Skia for Linux
+      run: |
+        wget "https://github.com/aseprite/skia/releases/download/$SKIA_VERSION/Skia-Linux-Release-x64.zip" -O skia-linux.zip
+        mkdir -p deps/skia
+        unzip skia-linux.zip -d deps/skia
+
+    - name: Configure CMake
+      run: |
+        mkdir build
+        cd build
+        cmake -G Ninja \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_CXX_FLAGS="-stdlib=libstdc++" \
+          -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libstdc++" \
+          -DLAF_BACKEND=skia \
+          -DSKIA_DIR=$GITHUB_WORKSPACE/deps/skia \
+          -DSKIA_LIBRARY_DIR=$GITHUB_WORKSPACE/deps/skia/out/Release-x64 \
+          -DSKIA_LIBRARY=$GITHUB_WORKSPACE/deps/skia/out/Release-x64/libskia.a \
+          ..
+
+    - name: Build with Ninja
+      run: |
+        cd build
+        ninja aseprite
+
+    - name: Upload Linux artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: aseprite-linux
+        path: build/bin/aseprite
+
+  # 可选：创建发布版本
+  create-release:
+    needs: [build-windows, build-macos-intel, build-macos-arm, build-linux]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          artifacts/aseprite-windows/aseprite.exe
+          artifacts/aseprite-macos-intel/aseprite
+          artifacts/aseprite-macos-arm/aseprite
+          artifacts/aseprite-linux/aseprite
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
