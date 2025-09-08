@@ -7,6 +7,14 @@ on:
     - 'laf'
   workflow_dispatch:
     inputs:
+      build_type:
+        description: 'Build type (Debug or RelWithDebInfo)'
+        required: true
+        default: 'RelWithDebInfo'
+        type: choice
+        options:
+        - Debug
+        - RelWithDebInfo
       os:
         description: 'Target operating system'
         required: true
@@ -23,8 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         os: ${{ github.event_name == 'workflow_dispatch' && [github.event.inputs.os] || [windows-latest, macos-latest, ubuntu-latest] }}
-        # 只构建RelWithDebInfo版本
-        build_type: ['RelWithDebInfo']
+        build_type: ${{ github.event_name == 'workflow_dispatch' && [github.event.inputs.build_type] || [RelWithDebInfo, Debug] }}
     steps:
     - uses: actions/checkout@v4
       with:
@@ -47,6 +54,7 @@ jobs:
     - name: Verify Build Output
       shell: bash
       run: |
+        # 列出构建目录内容用于调试
         echo "Build directory contents:"
         ls -R build || true
     - name: Running CLI Tests
@@ -59,18 +67,18 @@ jobs:
         cd tests
         $XVFB bash run-tests.sh
     - name: Package Artifacts
+      if: matrix.build_type == 'RelWithDebInfo'
       shell: bash
       run: |
         BUILD_DIR="$PWD/build"
-        ARTIFACT_NAME="aseprite-${{ runner.os }}"
+        ARTIFACT_NAME="aseprite-${{ runner.os }}-${{ matrix.build_type }}"
         
         case "${{ runner.os }}" in
           Windows)
-            # 查找Windows构建输出目录
-            if [ -d "$BUILD_DIR/bin/RelWithDebInfo" ]; then
-              OUTPUT_DIR="$BUILD_DIR/bin/RelWithDebInfo"
-            elif [ -d "$BUILD_DIR/bin/Release" ]; then
-              OUTPUT_DIR="$BUILD_DIR/bin/Release"
+            # 修复Windows路径问题
+            if [ -d "$BUILD_DIR/bin/${{ matrix.build_type }}" ]; then
+              # 如果存在构建类型子目录
+              OUTPUT_DIR="$BUILD_DIR/bin/${{ matrix.build_type }}"
             else
               OUTPUT_DIR="$BUILD_DIR/bin"
             fi
@@ -95,6 +103,7 @@ jobs:
             ;;
         esac
     - name: Upload Build Artifacts
+      if: matrix.build_type == 'RelWithDebInfo'
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.ASSET_NAME }}
