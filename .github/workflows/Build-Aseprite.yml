@@ -96,7 +96,7 @@ jobs:
           -DSKIA_DIR="${{ github.workspace }}/deps/skia" `
           -DSKIA_LIBRARY_DIR="${{ github.workspace }}/deps/skia/out/Release-x64" `
           -DSKIA_LIBRARY="${{ github.workspace }}/deps/skia/out/Release-x64/skia.lib" `   
-          "${{ github.workspace }}"
+          ..
           
     - name: Build with Ninja
       run: |
