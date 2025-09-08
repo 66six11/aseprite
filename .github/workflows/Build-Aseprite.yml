@@ -99,9 +99,11 @@ jobs:
     - name: Get latest Skia version
       id: get-skia-version
       run: |
-        SKIA_VERSION=$(curl -s https://api.github.com/repos/aseprite/skia/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-        echo "::set-output name=version::$SKIA_VERSION"
-        echo "Latest Skia version: $SKIA_VERSION"
+        $response = Invoke-WebRequest -Uri "https://api.github.com/repos/aseprite/skia/releases/latest" -UseBasicParsing
+        $json = $response.Content | ConvertFrom-Json
+        $tagName = $json.tag_name
+        echo "::set-output name=version::$tagName"
+        echo "Latest Skia version: $tagName"
 
     - name: Download Skia for macOS (Intel)
       run: |
@@ -174,9 +176,11 @@ jobs:
     - name: Get latest Skia version
       id: get-skia-version
       run: |
-        SKIA_VERSION=$(curl -s https://api.github.com/repos/aseprite/skia/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-        echo "::set-output name=version::$SKIA_VERSION"
-        echo "Latest Skia version: $SKIA_VERSION"
+        $response = Invoke-WebRequest -Uri "https://api.github.com/repos/aseprite/skia/releases/latest" -UseBasicParsing
+        $json = $response.Content | ConvertFrom-Json
+        $tagName = $json.tag_name
+        echo "::set-output name=version::$tagName"
+        echo "Latest Skia version: $tagName"
 
     - name: Download Skia for macOS (ARM)
       run: |
@@ -249,9 +253,11 @@ jobs:
     - name: Get latest Skia version
       id: get-skia-version
       run: |
-        SKIA_VERSION=$(curl -s https://api.github.com/repos/aseprite/skia/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-        echo "::set-output name=version::$SKIA_VERSION"
-        echo "Latest Skia version: $SKIA_VERSION"
+        $response = Invoke-WebRequest -Uri "https://api.github.com/repos/aseprite/skia/releases/latest" -UseBasicParsing
+        $json = $response.Content | ConvertFrom-Json
+        $tagName = $json.tag_name
+        echo "::set-output name=version::$tagName"
+        echo "Latest Skia version: $tagName"
 
     - name: Download Skia for Linux
       run: |
