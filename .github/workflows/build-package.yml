@@ -1,0 +1,97 @@
+name: build-package
+on:
+  push:
+    paths:
+    - '.github/workflows/build-auto.yml'
+    - 'build.sh'
+    - 'laf'
+jobs:
+  build-auto:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        build_type: [RelWithDebInfo, Debug]
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
+    - name: Install Dependencies
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y \
+          libpixman-1-dev libfreetype6-dev libharfbuzz-dev zlib1g-dev \
+          libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev libfontconfig1-dev
+    - uses: aseprite/get-ninja@main
+    - uses: ilammy/msvc-dev-cmd@v1
+      if: runner.os == 'Windows'
+    - name: Building
+      shell: bash
+      run: |
+        bash build.sh --auto --norun
+    - name: Running CLI Tests
+      shell: bash
+      run: |
+        if [[ "${{ runner.os }}" == "Linux" ]] ; then
+          export XVFB=xvfb-run
+        fi
+        export ASEPRITE=$PWD/build/bin/aseprite
+        cd tests
+        $XVFB bash run-tests.sh
+        
+    # ===== 打包步骤 =====
+    - name: Package Artifacts
+      shell: bash
+      run: |
+        # 创建输出目录
+        mkdir -p dist
+        
+        # 获取版本信息（假设可以从某个文件中获取）
+        if [ -f "src/version.h" ]; then
+          VERSION=$(grep -oP '(?<=VERSION ")[^"]+' src/version.h | head -1)
+        else
+          VERSION=$(date +%Y%m%d)
+        fi
+        
+        # 根据不同操作系统打包
+        if [[ "${{ runner.os }}" == "Windows" ]]; then
+          # Windows: 打包整个 bin 目录
+          7z a -tzip "dist/aseprite-$VERSION-windows-${{ matrix.build_type }}.zip" "build/bin/*"
+          
+        elif [[ "${{ runner.os }}" == "macOS" ]]; then
+          # macOS: 创建 DMG 或直接打包
+          zip -r "dist/aseprite-$VERSION-macos-${{ matrix.build_type }}.zip" "build/bin/Aseprite.app"
+          
+        else
+          # Linux: 打包可执行文件和必要的库
+          tar czvf "dist/aseprite-$VERSION-linux-${{ matrix.build_type }}.tar.gz" \
+            "build/bin/aseprite" \
+            "build/bin/lib"*
+        fi
+        
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: aseprite-build-${{ runner.os }}-${{ matrix.build_type }}
+        path: dist/*
+        
+    # ===== 发布到 GitHub Releases 草稿 =====
+    - name: Create Release Draft
+      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: nightly-${{ github.run_id }}
+        name: Nightly Build (${{ github.run_id }})
+        body: |
+          Automated nightly build of Aseprite
+          - OS: ${{ runner.os }}
+          - Build Type: ${{ matrix.build_type }}
+          - Commit: ${{ github.sha }}
+        draft: true
+        prerelease: true
+        files: dist/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
