@@ -90,13 +90,12 @@ jobs:
         $sdkPath = $sdkPath.Replace('\', '\\')
         
         # 配置 CMake，指定 Windows SDK 版本和路径
-        cmake 
+        cmake -G Ninja `
           -DCMAKE_BUILD_TYPE=RelWithDebInfo `
           -DLAF_BACKEND=skia `
           -DSKIA_DIR="${{ github.workspace }}/deps/skia" `
           -DSKIA_LIBRARY_DIR="${{ github.workspace }}/deps/skia/out/Release-x64" `
-          -DSKIA_LIBRARY="${{ github.workspace }}/deps/skia/out/Release-x64/skia.lib" `
-          -G Ninja `
+          -DSKIA_LIBRARY="${{ github.workspace }}/deps/skia/out/Release-x64/skia.lib" `   
           ..
 
     - name: Build with Ninja
