@@ -109,6 +109,14 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         path: artifacts
+        # 添加这个选项，将所有工件合并到一个目录中
+        merge-multiple: true
+    - name: List Downloaded Artifacts
+      run: |
+        echo "Artifacts directory contents:"
+        ls -la artifacts/
+        echo "All files in artifacts directory:"
+        find artifacts/ -type f
     - name: Create Draft Release
       uses: softprops/action-gh-release@v2
       with:
@@ -122,6 +130,10 @@ jobs:
           ${{ github.event_name == 'workflow_dispatch' && format('- Manual trigger by: {0}', github.actor) || '' }}
         draft: true
         prerelease: false
-        files: artifacts/*
+        # 使用更具体的文件模式
+        files: |
+          artifacts/aseprite-Windows.zip
+          artifacts/aseprite-Linux.tar.gz
+          artifacts/aseprite-macOS.tar.gz
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
