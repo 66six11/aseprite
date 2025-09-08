@@ -28,6 +28,11 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: 'recursive'
+    - name: Clone strings repository (full history)
+      shell: bash
+      run: |
+        mkdir -p data
+        git clone https://github.com/aseprite/strings.git data/strings
     - name: Install Dependencies
       if: runner.os == 'Linux'
       shell: bash
