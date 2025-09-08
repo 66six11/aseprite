@@ -97,7 +97,7 @@ jobs:
           -DCMAKE_LIBRARY_PATH="$sdkPath\\Lib\\10.0.19041.0\\um\\x64" `
           -DLAF_BACKEND=skia `
           -DSKIA_DIR="${{ github.workspace }}/deps/skia" `
-          -DSKIA_LIBRARY_DIR="${{ github.workspace }}/deps/skia/out/Release-x64" `
+          -DSKIA_LIBRARY_DIR="${{ github.workspace }}/deps/skia/out/Release-x极64" `
           -DSKIA_LIBRARY="${{ github.workspace }}/deps/skia/out/Release-x64/skia.lib" `
           ..
 
@@ -106,11 +106,16 @@ jobs:
         cd build
         ninja aseprite
 
+    - name: Package Windows build
+      run: |
+        # 创建压缩包
+        Compress-Archive -Path build/bin -DestinationPath aseprite-windows.zip
+        
     - name: Upload Windows artifact
       uses: actions/upload-artifact@v4
       with:
         name: aseprite-windows
-        path: build/bin/aseprite.exe
+        path: aseprite-windows.zip
         
   build-macos-intel:
     runs-on: macos-latest
@@ -178,11 +183,16 @@ jobs:
         cd build
         ninja aseprite
 
+    - name: Package macOS Intel build
+      run: |
+        # 创建压缩包
+        tar -czvf aseprite-macos-intel.tar.gz -C build/bin .
+        
     - name: Upload macOS Intel artifact
       uses: actions/upload-artifact@v4
       with:
         name: aseprite-macos-intel
-        path: build/bin/aseprite
+        path: aseprite-macos-intel.tar.gz
 
   build-macos-arm:
     runs-on: macos-latest
@@ -251,11 +261,16 @@ jobs:
         cd build
         ninja aseprite
 
+    - name: Package macOS ARM build
+      run: |
+        # 创建压缩包
+        tar -czvf aseprite-macos-arm.tar.gz -C build/bin .
+        
     - name: Upload macOS ARM artifact
       uses: actions/upload-artifact@v4
       with:
         name: aseprite-macos-arm
-        path: build/bin/aseprite
+        path: aseprite-macos-arm.tar.gz
 
   build-linux:
     runs-on: ubuntu-latest
@@ -321,11 +336,16 @@ jobs:
         cd build
         ninja aseprite
 
+    - name: Package Linux build
+      run: |
+        # 创建压缩包
+        tar -czvf aseprite-linux.tar.gz -C build/bin .
+        
     - name: Upload Linux artifact
       uses: actions/upload-artifact@v4
       with:
         name: aseprite-linux
-        path: build/bin/aseprite
+        path: aseprite-linux.tar.gz
 
   # 创建发布作业
   create-release:
@@ -342,13 +362,13 @@ jobs:
     
     - name: Verify Artifacts
       run: |
-        echo "验证工件是否存在:"
+        echo "验证压缩包是否存在:"
         ls -la artifacts/
         echo "检查具体文件:"
-        [ -f "artifacts/aseprite-windows/aseprite.exe" ] && echo "Windows 文件存在" || echo "Windows 文件缺失"
-        [ -f "artifacts/aseprite-macos-intel/aseprite" ] && echo "macOS Intel 文件存在" || echo "macOS Intel 文件缺失"
-        [ -f "artifacts/aseprite-macos-arm/aseprite" ] && echo "macOS ARM 文件存在" || echo "macOS ARM 文件缺失"
-        [ -f "artifacts/aseprite-linux/aseprite" ] && echo "Linux 文件存在" || echo "Linux 文件缺失"
+        [ -f "artifacts/aseprite-windows.zip" ] && echo "Windows 压缩包存在" || echo "Windows 压缩包缺失"
+        [ -f "artifacts/aseprite-macos-intel.tar.gz" ] && echo "macOS Intel 压缩包存在" || echo "macOS Intel 压缩包缺失"
+        [ -f "artifacts/aseprite-macos-arm.tar.gz" ] && echo "macOS ARM 压缩包存在" || echo "macOS ARM 压缩包缺失"
+        [ -f "artifacts/aseprite-linux.tar.gz" ] && echo "Linux 压缩包存在" || echo "Linux 压缩包缺失"
     
     - name: Create Draft Release
       uses: softprops/action-gh-release@v2
@@ -364,9 +384,9 @@ jobs:
         draft: true
         prerelease: false
         files: |
-          artifacts/aseprite-windows/aseprite.exe
-          artifacts/aseprite-macos-intel/aseprite
-          artifacts/aseprite-macos-arm/aseprite
-          artifacts/aseprite-linux/aseprite
+          artifacts/aseprite-windows.zip
+          artifacts/aseprite-macos-intel.tar.gz
+          artifacts/aseprite-macos-arm.tar.gz
+          artifacts/aseprite-linux.tar.gz
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
