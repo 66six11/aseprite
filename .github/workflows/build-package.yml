@@ -5,16 +5,8 @@ on:
     - '.github/workflows/build-package.yml'
     - 'build.sh'
     - 'laf'
-  workflow_dispatch:  # 添加手动触发
+  workflow_dispatch:
     inputs:
-      build_type:
-        description: 'Build type (Debug or RelWithDebInfo)'
-        required: true
-        default: 'RelWithDebInfo'
-        type: choice
-        options:
-        - Debug
-        - RelWithDebInfo
       os:
         description: 'Target operating system'
         required: true
@@ -30,9 +22,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 根据触发类型动态设置矩阵
-        os: ${{ github.event_name == 'workflow_dispatch' && [github.event.inputs.os] || [windows-latest, macos-latest, ubuntu-latest] }}
-        build_type: ${{ github.event_name == 'workflow_dispatch' && [github.event.inputs.build_type] || [RelWithDebInfo, Debug] }}
+        # 修复矩阵表达式语法
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && format('["{0}"]', github.event.inputs.os) || '["windows-latest", "macos-latest", "ubuntu-latest"]') }}
+        build_type: ['RelWithDebInfo']
     steps:
     - uses: actions/checkout@v4
       with:
@@ -52,6 +44,11 @@ jobs:
       shell: bash
       run: |
         bash build.sh --auto --norun
+    - name: Verify Build Output
+      shell: bash
+      run: |
+        echo "Build directory contents:"
+        ls -R build || true
     - name: Running CLI Tests
       shell: bash
       run: |
@@ -62,15 +59,30 @@ jobs:
         cd tests
         $XVFB bash run-tests.sh
     - name: Package Artifacts
-      if: matrix.build_type == 'RelWithDebInfo'
       shell: bash
       run: |
         BUILD_DIR="$PWD/build"
-        ARTIFACT_NAME="aseprite-${{ runner.os }}-${{ matrix.build_type }}"
+        ARTIFACT_NAME="aseprite-${{ runner.os }}"
         
         case "${{ runner.os }}" in
           Windows)
-            7z a "$ARTIFACT_NAME.zip" "$BUILD_DIR/bin/*"
+            # 查找Windows构建输出目录
+            if [ -d "$BUILD_DIR/bin/RelWithDebInfo" ]; then
+              OUTPUT_DIR="$BUILD_DIR/bin/RelWithDebInfo"
+            elif [ -d "$BUILD_DIR/bin/Release" ]; then
+              OUTPUT_DIR="$BUILD_DIR/bin/Release"
+            else
+              OUTPUT_DIR="$BUILD_DIR/bin"
+            fi
+            
+            # 确保7z可用
+            if ! command -v 7z &> /dev/null; then
+              echo "Installing 7zip..."
+              choco install 7zip -y
+            fi
+            
+            # 创建ZIP文件
+            7z a "$ARTIFACT_NAME.zip" "$OUTPUT_DIR/*"
             echo "ASSET_NAME=$ARTIFACT_NAME.zip" >> $GITHUB_ENV
             ;;
           macOS)
@@ -83,7 +95,6 @@ jobs:
             ;;
         esac
     - name: Upload Build Artifacts
-      if: matrix.build_type == 'RelWithDebInfo'
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.ASSET_NAME }}
