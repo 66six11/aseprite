@@ -327,19 +327,42 @@ jobs:
         name: aseprite-linux
         path: build/bin/aseprite
 
+  # 创建发布作业
   create-release:
-    needs: [build-windows, build-macos-intel, build-macos-arm, build-linux]
-  
+    name: Create Draft Release
     runs-on: ubuntu-latest
+    needs: [build-windows, build-macos-intel, build-macos-arm, build-linux]
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     steps:
-    - name: Download all artifacts
+    - name: Download All Artifacts
       uses: actions/download-artifact@v4
       with:
         path: artifacts
-
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
+        merge-multiple: true
+    
+    - name: Verify Artifacts
+      run: |
+        echo "验证工件是否存在:"
+        ls -la artifacts/
+        echo "检查具体文件:"
+        [ -f "artifacts/aseprite-windows/aseprite.exe" ] && echo "Windows 文件存在" || echo "Windows 文件缺失"
+        [ -f "artifacts/aseprite-macos-intel/aseprite" ] && echo "macOS Intel 文件存在" || echo "macOS Intel 文件缺失"
+        [ -f "artifacts/aseprite-macos-arm/aseprite" ] && echo "macOS ARM 文件存在" || echo "macOS ARM 文件缺失"
+        [ -f "artifacts/aseprite-linux/aseprite" ] && echo "Linux 文件存在" || echo "Linux 文件缺失"
+    
+    - name: Create Draft Release
+      uses: softprops/action-gh-release@v2
       with:
+        tag_name: auto-build-${{ github.run_id }}
+        name: "Autobuild #${{ github.run_number }} (${{ github.sha }})"
+        body: |
+          Automated build from CI      
+          - Trigger: ${{ github.event_name }}
+          - Commit: ${{ github.sha }}
+          - Build ID: ${{ github.run_id }}
+          ${{ github.event_name == 'workflow_dispatch' && format('- Manual trigger by: {0}', github.actor) || '' }}
+        draft: true
+        prerelease: false
         files: |
           artifacts/aseprite-windows/aseprite.exe
           artifacts/aseprite-macos-intel/aseprite
