@@ -5,7 +5,7 @@ on:
     - '.github/workflows/build-package.yml'
     - 'build.sh'
     - 'laf'
-  workflow_dispatch:
+  workflow_dispatch:  # 添加手动触发
     inputs:
       build_type:
         description: 'Build type (Debug or RelWithDebInfo)'
@@ -30,6 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # 根据触发类型动态设置矩阵
         os: ${{ github.event_name == 'workflow_dispatch' && [github.event.inputs.os] || [windows-latest, macos-latest, ubuntu-latest] }}
         build_type: ${{ github.event_name == 'workflow_dispatch' && [github.event.inputs.build_type] || [RelWithDebInfo, Debug] }}
     steps:
@@ -51,12 +52,6 @@ jobs:
       shell: bash
       run: |
         bash build.sh --auto --norun
-    - name: Verify Build Output
-      shell: bash
-      run: |
-        # 列出构建目录内容用于调试
-        echo "Build directory contents:"
-        ls -R build || true
     - name: Running CLI Tests
       shell: bash
       run: |
@@ -75,22 +70,7 @@ jobs:
         
         case "${{ runner.os }}" in
           Windows)
-            # 修复Windows路径问题
-            if [ -d "$BUILD_DIR/bin/${{ matrix.build_type }}" ]; then
-              # 如果存在构建类型子目录
-              OUTPUT_DIR="$BUILD_DIR/bin/${{ matrix.build_type }}"
-            else
-              OUTPUT_DIR="$BUILD_DIR/bin"
-            fi
-            
-            # 确保7z可用
-            if ! command -v 7z &> /dev/null; then
-              echo "Installing 7zip..."
-              choco install 7zip -y
-            fi
-            
-            # 创建ZIP文件
-            7z a "$ARTIFACT_NAME.zip" "$OUTPUT_DIR/*"
+            7z a "$ARTIFACT_NAME.zip" "$BUILD_DIR/bin/*"
             echo "ASSET_NAME=$ARTIFACT_NAME.zip" >> $GITHUB_ENV
             ;;
           macOS)
