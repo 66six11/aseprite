@@ -8,9 +8,6 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
-env:
-  SKIA_VERSION: 'm124'  # 使用正确的标签名称
-
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -24,12 +21,43 @@ jobs:
       run: |
         choco install cmake ninja -y
 
+    - name: Get latest Skia version
+      id: get-skia-version
+      run: |
+        $response = Invoke-WebRequest -Uri "https://api.github.com/repos/aseprite/skia/releases/latest" -UseBasicParsing
+        $json = $response.Content | ConvertFrom-Json
+        $tagName = $json.tag_name
+        echo "::set-output name=version::$tagName"
+        echo "Latest Skia version: $tagName"
+
     - name: Download Skia for Windows
       run: |
-        $skiaUrl = "https://github.com/aseprite/skia/releases/download/$env:SKIA_VERSION/Skia-Windows-Release-x64.zip"
+        $skiaVersion = "${{ steps.get-skia-version.outputs.version }}"
+        $skiaUrl = "https://github.com/aseprite/skia/releases/download/$skiaVersion/Skia-Windows-Release-x64.zip"
+        
+        # 下载文件
+        Write-Host "Downloading Skia from: $skiaUrl"
         Invoke-WebRequest -Uri $skiaUrl -OutFile "skia-windows.zip"
+        
+        # 检查文件大小
+        $file = Get-Item "skia-windows.zip"
+        if ($file.Length -lt 10000000) {
+            Write-Host "Error: Downloaded file is too small ($($file.Length) bytes). Contents:"
+            Get-Content "skia-windows.zip"
+            exit 1
+        }
+        
+        # 创建目标目录
         New-Item -ItemType Directory -Path "deps" -Force
+        
+        # 解压文件
         Expand-Archive -Path "skia-windows.zip" -DestinationPath "deps/skia"
+        
+        # 验证解压结果
+        if (-not (Test-Path "deps/skia/out/Release-x64")) {
+            Write-Host "Error: Skia extraction failed. Directory structure not found."
+            exit 1
+        }
 
     - name: Configure CMake
       run: |
@@ -68,11 +96,41 @@ jobs:
         brew uninstall --ignore-dependencies cmake || true
         brew install cmake ninja
 
+    - name: Get latest Skia version
+      id: get-skia-version
+      run: |
+        SKIA_VERSION=$(curl -s https://api.github.com/repos/aseprite/skia/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        echo "::set-output name=version::$SKIA_VERSION"
+        echo "Latest Skia version: $SKIA_VERSION"
+
     - name: Download Skia for macOS (Intel)
       run: |
-        curl -L "https://github.com/aseprite/skia/releases/download/$SKIA_VERSION/Skia-macOS-Release-x64.zip" -o skia-macos.zip
+        SKIA_VERSION="${{ steps.get-skia-version.outputs.version }}"
+        SKIA_URL="https://github.com/aseprite/skia/releases/download/$SKIA_VERSION/Skia-macOS-Release-x64.zip"
+        
+        # 使用 curl 下载并验证文件大小
+        echo "Downloading Skia from: $SKIA_URL"
+        curl -L "$SKIA_URL" -o skia-macos.zip
+        
+        # 检查文件大小是否合理（至少 10MB）
+        FILE_SIZE=$(stat -f%z skia-macos.zip)
+        if [ "$FILE_SIZE" -lt 10000000 ]; then
+            echo "Error: Downloaded file is too small ($FILE_SIZE bytes). Contents:"
+            cat skia-macos.zip
+            exit 1
+        fi
+        
+        # 创建目标目录
         mkdir -p deps/skia
+        
+        # 解压文件
         unzip skia-macos.zip -d deps/skia
+        
+        # 验证解压结果
+        if [ ! -d "deps/skia/out/Release-x64" ]; then
+            echo "Error: Skia extraction failed. Directory structure not found."
+            exit 1
+        fi
 
     - name: Configure CMake for Intel
       run: |
@@ -113,11 +171,41 @@ jobs:
         brew uninstall --ignore-dependencies cmake || true
         brew install cmake ninja
 
+    - name: Get latest Skia version
+      id: get-skia-version
+      run: |
+        SKIA_VERSION=$(curl -s https://api.github.com/repos/aseprite/skia/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        echo "::set-output name=version::$SKIA_VERSION"
+        echo "Latest Skia version: $SKIA_VERSION"
+
     - name: Download Skia for macOS (ARM)
       run: |
-        curl -L "https://github.com/aseprite/skia/releases/download/$SKIA_VERSION/Skia-macOS-Release-arm64.zip" -o skia-macos-arm.zip
+        SKIA_VERSION="${{ steps.get-skia-version.outputs.version }}"
+        SKIA_URL="https://github.com/aseprite/skia/releases/download/$SKIA_VERSION/Skia-macOS-Release-arm64.zip"
+        
+        # 使用 curl 下载并验证文件大小
+        echo "Downloading Skia from: $SKIA_URL"
+        curl -L "$SKIA_URL" -o skia-macos-arm.zip
+        
+        # 检查文件大小是否合理（至少 10MB）
+        FILE_SIZE=$(stat -f%z skia-macos-arm.zip)
+        if [ "$FILE_SIZE" -lt 10000000 ]; then
+            echo "Error: Downloaded file is too small ($FILE_SIZE bytes). Contents:"
+            cat skia-macos-arm.zip
+            exit 1
+        fi
+        
+        # 创建目标目录
         mkdir -p deps/skia
+        
+        # 解压文件
         unzip skia-macos-arm.zip -d deps/skia
+        
+        # 验证解压结果
+        if [ ! -d "deps/skia/out/Release-arm64" ]; then
+            echo "Error: Skia extraction failed. Directory structure not found."
+            exit 1
+        fi
 
     - name: Configure CMake for ARM
       run: |
@@ -158,11 +246,41 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y clang cmake ninja-build libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev libfontconfig1-dev
 
+    - name: Get latest Skia version
+      id: get-skia-version
+      run: |
+        SKIA_VERSION=$(curl -s https://api.github.com/repos/aseprite/skia/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        echo "::set-output name=version::$SKIA_VERSION"
+        echo "Latest Skia version: $SKIA_VERSION"
+
     - name: Download Skia for Linux
       run: |
-        wget "https://github.com/aseprite/skia/releases/download/$SKIA_VERSION/Skia-Linux-Release-x64.zip" -O skia-linux.zip
+        SKIA_VERSION="${{ steps.get-skia-version.outputs.version }}"
+        SKIA_URL="https://github.com/aseprite/skia/releases/download/$SKIA_VERSION/Skia-Linux-Release-x64.zip"
+        
+        # 下载文件
+        echo "Downloading Skia from: $SKIA_URL"
+        wget "$SKIA_URL" -O skia-linux.zip
+        
+        # 检查文件大小
+        FILE_SIZE=$(stat -c%s skia-linux.zip)
+        if [ "$FILE_SIZE" -lt 10000000 ]; then
+            echo "Error: Downloaded file is too small ($FILE_SIZE bytes). Contents:"
+            cat skia-linux.zip
+            exit 1
+        fi
+        
+        # 创建目标目录
         mkdir -p deps/skia
+        
+        # 解压文件
         unzip skia-linux.zip -d deps/skia
+        
+        # 验证解压结果
+        if [ ! -d "deps/skia/out/Release-x64" ]; then
+            echo "Error: Skia extraction failed. Directory structure not found."
+            exit 1
+        fi
 
     - name: Configure CMake
       run: |
