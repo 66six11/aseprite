@@ -78,6 +78,7 @@ jobs:
         # 配置 CMake
         cmake -G Ninja `
           -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+          -DCMAKE_SYSTEM_VERSION=10.0.19041.0 `
           -DLAF_BACKEND=skia `
           -DSKIA_DIR="${{ github.workspace }}/deps/skia" `
           -DSKIA_LIBRARY_DIR="${{ github.workspace }}/deps/skia/out/Release-x64" `
