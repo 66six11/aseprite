@@ -5,53 +5,14 @@ on:
     - '.github/workflows/build-package.yml'
     - 'build.sh'
     - 'laf'
-  workflow_dispatch:
-    inputs:
-      release_type:
-        description: 'Release type'
-        required: true
-        default: 'nightly'
-        type: choice
-        options:
-        - nightly
-        - stable
-      build_os:
-        description: 'Operating System to build for'
-        required: true
-        default: 'all'
-        type: choice
-        options:
-        - all
-        - windows
-        - macos
-        - linux
-      build_type:
-        description: 'Build type'
-        required: true
-        default: 'RelWithDebInfo'
-        type: choice
-        options:
-        - RelWithDebInfo
-        - Debug
 jobs:
   build-auto:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        # 修复了 fromJSON 函数的使用
-        os: ${{ fromJSON(
-          github.event.inputs.build_os == 'all' ? 
-          '["windows-latest", "macos-latest", "ubuntu-latest"]' : 
-          (github.event.inputs.build_os == 'windows' ? '["windows-latest"]' :
-          (github.event.inputs.build_os == 'macos' ? '["macos-latest"]' :
-          '["ubuntu-latest"]'))
-        ) }}
-        build_type: ${{ fromJSON(
-          github.event.inputs.build_type == 'all' ?
-          '["RelWithDebInfo", "Debug"]' :
-          '["' + github.event.inputs.build_type + '"]'
-        ) }}
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        build_type: [RelWithDebInfo, Debug]
     steps:
     - uses: actions/checkout@v4
       with:
@@ -80,61 +41,58 @@ jobs:
         export ASEPRITE=$PWD/build/bin/aseprite
         cd tests
         $XVFB bash run-tests.sh
-        
-    # ===== 打包步骤 =====
+    # 新增打包步骤
     - name: Package Artifacts
+      if: matrix.build_type == 'RelWithDebInfo'  # 仅打包发布版本
       shell: bash
       run: |
-        # 创建输出目录
-        mkdir -p dist
+        BUILD_DIR="$PWD/build"
+        ARTIFACT_NAME="aseprite-${{ runner.os }}-${{ matrix.build_type }}"
         
-        # 获取版本信息
-        if [ -f "src/version.h" ]; then
-          VERSION=$(grep -oP '(?<=VERSION ")[^"]+' src/version.h | head -1)
-        else
-          VERSION=$(date +%Y%m%d)
-        fi
-        
-        # 添加发布类型前缀
-        RELEASE_PREFIX="${{ github.event.inputs.release_type || 'nightly' }}"
-        
-        # 根据不同操作系统打包
-        if [[ "${{ runner.os }}" == "Windows" ]]; then
-          # Windows: 打包整个 bin 目录
-          7z a -tzip "dist/aseprite-$RELEASE_PREFIX-$VERSION-windows-${{ matrix.build_type }}.zip" "build/bin/*"
-          
-        elif [[ "${{ runner.os }}" == "macOS" ]]; then
-          # macOS: 创建 DMG 或直接打包
-          zip -r "dist/aseprite-$RELEASE_PREFIX-$VERSION-macos-${{ matrix.build_type }}.zip" "build/bin/Aseprite.app"
-          
-        else
-          # Linux: 打包可执行文件和必要的库
-          tar czvf "dist/aseprite-$RELEASE_PREFIX-$VERSION-linux-${{ matrix.build_type }}.tar.gz" \
-            "build/bin/aseprite" \
-            "build/bin/lib"*
-        fi
-        
-    - name: Upload Artifacts
+        case "${{ runner.os }}" in
+          Windows)
+            7z a "$ARTIFACT_NAME.zip" "$BUILD_DIR/bin/*"
+            echo "ASSET_NAME=$ARTIFACT_NAME.zip" >> $GITHUB_ENV
+            ;;
+          macOS)
+            tar czf "$ARTIFACT_NAME.tar.gz" -C "$BUILD_DIR/bin" .
+            echo "ASSET_NAME=$ARTIFACT_NAME.tar.gz" >> $GITHUB_ENV
+            ;;
+          Linux)
+            tar czf "$ARTIFACT_NAME.tar.gz" -C "$BUILD_DIR/bin" .
+            echo "ASSET_NAME=$ARTIFACT_NAME.tar.gz" >> $GITHUB_ENV
+            ;;
+        esac
+    # 新增上传工件步骤
+    - name: Upload Build Artifacts
+      if: matrix.build_type == 'RelWithDebInfo'
       uses: actions/upload-artifact@v4
       with:
-        name: aseprite-${{ github.event.inputs.release_type || 'nightly' }}-build-${{ runner.os }}-${{ matrix.build_type }}
-        path: dist/*
-        
-    # ===== 发布到 GitHub Releases 草稿 =====
-    - name: Create Release Draft
-      if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch'
-      uses: softprops/action-gh-release@v1
+        name: ${{ env.ASSET_NAME }}
+        path: ${{ env.ASSET_NAME }}
+
+  # 新增发布草稿版本作业
+  create-release:
+    name: Create Draft Release
+    runs-on: ubuntu-latest
+    needs: build-auto  # 依赖所有构建作业
+    if: github.ref == 'refs/heads/main'  # 仅在主分支触发
+    steps:
+    - name: Download All Artifacts
+      uses: actions/download-artifact@v4
       with:
-        tag_name: ${{ github.event.inputs.release_type || 'nightly' }}-${{ github.run_id }}
-        name: ${{ (github.event.inputs.release_type == 'stable' && 'Stable') || 'Nightly' }} Build (${{ github.run_id }})
+        path: artifacts
+    - name: Create Draft Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: auto-build-${{ github.run_id }}
+        name: "Autobuild #${{ github.run_number }} (${{ github.sha }})"
         body: |
-          ${{ (github.event.inputs.release_type == 'stable' && 'Stable') || 'Nightly' }} build of Aseprite
-          - OS: ${{ runner.os }}
-          - Build Type: ${{ matrix.build_type }}
+          Automated build from CI
           - Commit: ${{ github.sha }}
-          - Trigger: ${{ github.event_name }}
+          - Build ID: ${{ github.run_id }}
         draft: true
-        prerelease: ${{ github.event.inputs.release_type != 'stable' }}
-        files: dist/*
+        prerelease: false
+        files: artifacts/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
