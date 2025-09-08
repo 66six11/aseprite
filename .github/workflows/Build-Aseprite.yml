@@ -83,15 +83,18 @@ jobs:
         # 获取 Windows SDK 路径
         $sdkPath = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots").KitsRoot10
         if (-not $sdkPath) {
-            $sdkPath = "C:\Program Files (x86)\Windows Kits\10"
+            $sdkPath = "C:\\Program Files (x86)\\Windows Kits\\10"
         }
+        
+        # 转义路径中的反斜杠
+        $sdkPath = $sdkPath.Replace('\', '\\')
         
         # 配置 CMake，指定 Windows SDK 版本和路径
         cmake -G Ninja `
           -DCMAKE_BUILD_TYPE=RelWithDebInfo `
           -DCMAKE_SYSTEM_VERSION=10.0.19041.0 `
-          -DCMAKE_INCLUDE_PATH="$sdkPath\Include\10.0.19041.0\um" `
-          -DCMAKE_LIBRARY_PATH="$sdkPath\Lib\10.0.19041.0\um\x64" `
+          -DCMAKE_INCLUDE_PATH="$sdkPath\\Include\\10.0.19041.0\\um" `
+          -DCMAKE_LIBRARY_PATH="$sdkPath\\Lib\\10.0.19041.0\\um\\x64" `
           -DLAF_BACKEND=skia `
           -DSKIA_DIR="${{ github.workspace }}/deps/skia" `
           -DSKIA_LIBRARY_DIR="${{ github.workspace }}/deps/skia/out/Release-x64" `
