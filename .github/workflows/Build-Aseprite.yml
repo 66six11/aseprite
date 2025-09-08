@@ -90,15 +90,13 @@ jobs:
         $sdkPath = $sdkPath.Replace('\', '\\')
         
         # 配置 CMake，指定 Windows SDK 版本和路径
-        cmake -G Ninja `
+        cmake 
           -DCMAKE_BUILD_TYPE=RelWithDebInfo `
-          -DCMAKE_SYSTEM_VERSION=10.0.19041.0 `
-          -DCMAKE_INCLUDE_PATH="$sdkPath\\Include\\10.0.19041.0\\um" `
-          -DCMAKE_LIBRARY_PATH="$sdkPath\\Lib\\10.0.19041.0\\um\\x64" `
           -DLAF_BACKEND=skia `
           -DSKIA_DIR="${{ github.workspace }}/deps/skia" `
           -DSKIA_LIBRARY_DIR="${{ github.workspace }}/deps/skia/out/Release-x64" `
           -DSKIA_LIBRARY="${{ github.workspace }}/deps/skia/out/Release-x64/skia.lib" `
+          -G Ninja `
           ..
 
     - name: Build with Ninja
@@ -108,8 +106,8 @@ jobs:
 
     - name: Package Windows build
       run: |
-        # 创建压缩包
-        Compress-Archive -Path build/bin -DestinationPath aseprite-windows.zip
+        # 创建压缩包，直接包含 bin 目录内容
+        Compress-Archive -Path build/bin/* -DestinationPath aseprite-windows.zip
         
     - name: Upload Windows artifact
       uses: actions/upload-artifact@v4
@@ -163,6 +161,9 @@ jobs:
 
     - name: Configure CMake for Intel
       run: |
+        # 获取 macOS SDK 路径
+        SDK_PATH=$(xcrun --show-sdk-path)
+        
         # 创建构建目录
         mkdir build
         cd build
@@ -172,10 +173,11 @@ jobs:
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_OSX_ARCHITECTURES=x86_64 \
           -DCMAKE_OSX_DEPLOYMENT_TARGET=10.9 \
+          -DCMAKE_OSX_SYSROOT="$SDK_PATH" \
           -DLAF_BACKEND=skia \
-          -DSKIA_DIR=$GITHUB_WORKSPACE/deps/skia \
-          -DSKIA_LIBRARY_DIR=$GITHUB_WORKSPACE/deps/skia/out/Release-x64 \
-          -DSKIA_LIBRARY=$GITHUB_WORKSPACE/deps/skia/out/Release-x64/libskia.a \
+          -DSKIA_DIR="$GITHUB_WORKSPACE/deps/skia" \
+          -DSKIA_LIBRARY_DIR="$GITHUB_WORKSPACE/deps/skia/out/Release-x64" \
+          -DSKIA_LIBRARY="$GITHUB_WORKSPACE/deps/skia/out/Release-x64/libskia.a" \
           ..
 
     - name: Build with Ninja
@@ -240,6 +242,9 @@ jobs:
 
     - name: Configure CMake for ARM
       run: |
+        # 获取 macOS SDK 路径
+        SDK_PATH=$(xcrun --show-sdk-path)
+        
         # 创建构建目录
         mkdir build
         cd build
@@ -249,10 +254,11 @@ jobs:
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_OSX_ARCHITECTURES=arm64 \
           -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+          -DCMAKE_OSX_SYSROOT="$SDK_PATH" \
           -DLAF_BACKEND=skia \
-          -DSKIA_DIR=$GITHUB_WORKSPACE/deps/skia \
-          -DSKIA_LIBRARY_DIR=$GITHUB_WORKSPACE/deps/skia/out/Release-arm64 \
-          -DSKIA_LIBRARY=$GITHUB_WORKSPACE/deps/skia/out/Release-arm64/libskia.a \
+          -DSKIA_DIR="$GITHUB_WORKSPACE/deps/skia" \
+          -DSKIA_LIBRARY_DIR="$GITHUB_WORKSPACE/deps/skia/out/Release-arm64" \
+          -DSKIA_LIBRARY="$GITHUB_WORKSPACE/deps/skia/out/Release-arm64/libskia.a" \
           -DPNG_ARM_NEON=on \
           ..
 
@@ -316,8 +322,7 @@ jobs:
         fi
 
     - name: Configure CMake for Linux
-      run: |
-        
+      run: |  
         # 创建构建目录
         mkdir build
         cd build
