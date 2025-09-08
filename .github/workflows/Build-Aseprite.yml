@@ -97,7 +97,7 @@ jobs:
           -DCMAKE_LIBRARY_PATH="$sdkPath\\Lib\\10.0.19041.0\\um\\x64" `
           -DLAF_BACKEND=skia `
           -DSKIA_DIR="${{ github.workspace }}/deps/skia" `
-          -DSKIA_LIBRARY_DIR="${{ github.workspace }}/deps/skia/out/Release-x极64" `
+          -DSKIA_LIBRARY_DIR="${{ github.workspace }}/deps/skia/out/Release-x64" `
           -DSKIA_LIBRARY="${{ github.workspace }}/deps/skia/out/Release-x64/skia.lib" `
           ..
 
