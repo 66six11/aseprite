@@ -22,7 +22,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 修复矩阵表达式语法
         os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && format('["{0}"]', github.event.inputs.os) || '["windows-latest", "macos-latest", "ubuntu-latest"]') }}
         build_type: ['RelWithDebInfo']
     steps:
@@ -44,11 +43,6 @@ jobs:
       shell: bash
       run: |
         bash build.sh --auto --norun
-    - name: Verify Build Output
-      shell: bash
-      run: |
-        echo "Build directory contents:"
-        ls -R build || true
     - name: Running CLI Tests
       shell: bash
       run: |
@@ -66,31 +60,36 @@ jobs:
         
         case "${{ runner.os }}" in
           Windows)
-            # 查找Windows构建输出目录
-            if [ -d "$BUILD_DIR/bin/RelWithDebInfo" ]; then
-              OUTPUT_DIR="$BUILD_DIR/bin/RelWithDebInfo"
-            elif [ -d "$BUILD_DIR/bin/Release" ]; then
-              OUTPUT_DIR="$BUILD_DIR/bin/Release"
-            else
-              OUTPUT_DIR="$BUILD_DIR/bin"
-            fi
-            
             # 确保7z可用
             if ! command -v 7z &> /dev/null; then
               echo "Installing 7zip..."
               choco install 7zip -y
             fi
             
-            # 创建ZIP文件
-            7z a "$ARTIFACT_NAME.zip" "$OUTPUT_DIR/*"
+            # 直接使用build/bin目录
+            cd "$BUILD_DIR/bin"
+            
+            # 创建ZIP文件，包含所有内容
+            7z a "$ARTIFACT_NAME.zip" *
+            
+            # 移动ZIP文件到工作目录
+            mv "$ARTIFACT_NAME.zip" "$GITHUB_WORKSPACE/"
+            cd "$GITHUB_WORKSPACE"
+            
             echo "ASSET_NAME=$ARTIFACT_NAME.zip" >> $GITHUB_ENV
             ;;
           macOS)
-            tar czf "$ARTIFACT_NAME.tar.gz" -C "$BUILD_DIR/bin" .
+            cd "$BUILD_DIR/bin"
+            tar czf "$ARTIFACT_NAME.tar.gz" *
+            mv "$ARTIFACT_NAME.tar.gz" "$GITHUB_WORKSPACE/"
+            cd "$GITHUB_WORKSPACE"
             echo "ASSET_NAME=$ARTIFACT_NAME.tar.gz" >> $GITHUB_ENV
             ;;
           Linux)
-            tar czf "$ARTIFACT_NAME.tar.gz" -C "$BUILD_DIR/bin" .
+            cd "$BUILD_DIR/bin"
+            tar czf "$ARTIFACT_NAME.tar.gz" *
+            mv "$ARTIFACT_NAME.tar.gz" "$GITHUB_WORKSPACE/"
+            cd "$GITHUB_WORKSPACE"
             echo "ASSET_NAME=$ARTIFACT_NAME.tar.gz" >> $GITHUB_ENV
             ;;
         esac
