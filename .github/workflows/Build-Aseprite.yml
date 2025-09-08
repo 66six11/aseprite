@@ -40,6 +40,11 @@ jobs:
       run: |
         choco install cmake ninja -y
 
+    - name: Setup MSVC environment
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
     - name: Download Skia for Windows
       run: |
         $skiaVersion = "${{ needs.get-skia-version.outputs.version }}"
@@ -75,10 +80,18 @@ jobs:
         New-Item -ItemType Directory -Path "build" -Force
         cd build
         
-        # 配置 CMake
+        # 获取 Windows SDK 路径
+        $sdkPath = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots").KitsRoot10
+        if (-not $sdkPath) {
+            $sdkPath = "C:\Program Files (x86)\Windows Kits\10"
+        }
+        
+        # 配置 CMake，指定 Windows SDK 版本和路径
         cmake -G Ninja `
           -DCMAKE_BUILD_TYPE=RelWithDebInfo `
           -DCMAKE_SYSTEM_VERSION=10.0.19041.0 `
+          -DCMAKE_INCLUDE_PATH="$sdkPath\Include\10.0.19041.0\um" `
+          -DCMAKE_LIBRARY_PATH="$sdkPath\Lib\10.0.19041.0\um\x64" `
           -DLAF_BACKEND=skia `
           -DSKIA_DIR="${{ github.workspace }}/deps/skia" `
           -DSKIA_LIBRARY_DIR="${{ github.workspace }}/deps/skia/out/Release-x64" `
@@ -95,7 +108,7 @@ jobs:
       with:
         name: aseprite-windows
         path: build/bin/aseprite.exe
-
+        
   build-macos-intel:
     runs-on: macos-latest
     needs: get-skia-version
