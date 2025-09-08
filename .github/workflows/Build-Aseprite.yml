@@ -69,7 +69,31 @@ jobs:
             exit 1
         }
 
-    # ... 其他 Windows 步骤保持不变 ...
+    - name: Configure CMake for Windows
+      run: |
+        # 创建构建目录
+        New-Item -ItemType Directory -Path "build" -Force
+        cd build
+        
+        # 配置 CMake
+        cmake -G Ninja `
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+          -DLAF_BACKEND=skia `
+          -DSKIA_DIR="${{ github.workspace }}/deps/skia" `
+          -DSKIA_LIBRARY_DIR="${{ github.workspace }}/deps/skia/out/Release-x64" `
+          -DSKIA_LIBRARY="${{ github.workspace }}/deps/skia/out/Release-x64/skia.lib" `
+          ..
+
+    - name: Build with Ninja
+      run: |
+        cd build
+        ninja aseprite
+
+    - name: Upload Windows artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: aseprite-windows
+        path: build/bin/aseprite.exe
 
   build-macos-intel:
     runs-on: macos-latest
@@ -115,7 +139,33 @@ jobs:
             exit 1
         fi
 
-    # ... 其他 macOS Intel 步骤保持不变 ...
+    - name: Configure CMake for Intel
+      run: |
+        # 创建构建目录
+        mkdir build
+        cd build
+        
+        # 配置 CMake
+        cmake -G Ninja \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=10.9 \
+          -DLAF_BACKEND=skia \
+          -DSKIA_DIR=$GITHUB_WORKSPACE/deps/skia \
+          -DSKIA_LIBRARY_DIR=$GITHUB_WORKSPACE/deps/skia/out/Release-x64 \
+          -DSKIA_LIBRARY=$GITHUB_WORKSPACE/deps/skia/out/Release-x64/libskia.a \
+          ..
+
+    - name: Build with Ninja
+      run: |
+        cd build
+        ninja aseprite
+
+    - name: Upload macOS Intel artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: aseprite-macos-intel
+        path: build/bin/aseprite
 
   build-macos-arm:
     runs-on: macos-latest
@@ -161,7 +211,34 @@ jobs:
             exit 1
         fi
 
-    # ... 其他 macOS ARM 步骤保持不变 ...
+    - name: Configure CMake for ARM
+      run: |
+        # 创建构建目录
+        mkdir build
+        cd build
+        
+        # 配置 CMake
+        cmake -G Ninja \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_OSX_ARCHITECTURES=arm64 \
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+          -DLAF_BACKEND=skia \
+          -DSKIA_DIR=$GITHUB_WORKSPACE/deps/skia \
+          -DSKIA_LIBRARY_DIR=$GITHUB_WORKSPACE/deps/skia/out/Release-arm64 \
+          -DSKIA_LIBRARY=$GITHUB_WORKSPACE/deps/skia/out/Release-arm64/libskia.a \
+          -DPNG_ARM_NEON=on \
+          ..
+
+    - name: Build with Ninja
+      run: |
+        cd build
+        ninja aseprite
+
+    - name: Upload macOS ARM artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: aseprite-macos-arm
+        path: build/bin/aseprite
 
   build-linux:
     runs-on: ubuntu-20.04
@@ -206,7 +283,33 @@ jobs:
             exit 1
         fi
 
-    # ... 其他 Linux 步骤保持不变 ...
+    - name: Configure CMake for Linux
+      run: |
+        # 创建构建目录
+        mkdir build
+        cd build
+        
+        # 配置 CMake
+        cmake -G Ninja \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_CXX_FLAGS="-stdlib=libstdc++" \
+          -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libstdc++" \
+          -DLAF_BACKEND=skia \
+          -DSKIA_DIR=$GITHUB_WORKSPACE/deps/skia \
+          -DSKIA_LIBRARY_DIR=$GITHUB_WORKSPACE/deps/skia/out/Release-x64 \
+          -DSKIA_LIBRARY=$GITHUB_WORKSPACE/deps/skia/out/Release-x64/libskia.a \
+          ..
+
+    - name: Build with Ninja
+      run: |
+        cd build
+        ninja aseprite
+
+    - name: Upload Linux artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: aseprite-linux
+        path: build/bin/aseprite
 
   create-release:
     needs: [build-windows, build-macos-intel, build-macos-arm, build-linux]
