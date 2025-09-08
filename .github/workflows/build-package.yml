@@ -5,14 +5,26 @@ on:
     - '.github/workflows/build-package.yml'
     - 'build.sh'
     - 'laf'
+  workflow_dispatch:
+    inputs:
+      os:
+        description: 'Target operating system'
+        required: true
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+        - windows-latest
+        - macos-latest
+        - ubuntu-latest
 jobs:
   build-auto:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-        build_type: [RelWithDebInfo, Debug]
+        os: ${{ github.event_name == 'workflow_dispatch' && [github.event.inputs.os] || [windows-latest, macos-latest, ubuntu-latest] }}
+        # 只构建RelWithDebInfo版本
+        build_type: ['RelWithDebInfo']
     steps:
     - uses: actions/checkout@v4
       with:
@@ -32,6 +44,11 @@ jobs:
       shell: bash
       run: |
         bash build.sh --auto --norun
+    - name: Verify Build Output
+      shell: bash
+      run: |
+        echo "Build directory contents:"
+        ls -R build || true
     - name: Running CLI Tests
       shell: bash
       run: |
@@ -41,17 +58,31 @@ jobs:
         export ASEPRITE=$PWD/build/bin/aseprite
         cd tests
         $XVFB bash run-tests.sh
-    # 新增打包步骤
     - name: Package Artifacts
-      if: matrix.build_type == 'RelWithDebInfo'  # 仅打包发布版本
       shell: bash
       run: |
         BUILD_DIR="$PWD/build"
-        ARTIFACT_NAME="aseprite-${{ runner.os }}-${{ matrix.build_type }}"
+        ARTIFACT_NAME="aseprite-${{ runner.os }}"
         
         case "${{ runner.os }}" in
           Windows)
-            7z a "$ARTIFACT_NAME.zip" "$BUILD_DIR/bin/*"
+            # 查找Windows构建输出目录
+            if [ -d "$BUILD_DIR/bin/RelWithDebInfo" ]; then
+              OUTPUT_DIR="$BUILD_DIR/bin/RelWithDebInfo"
+            elif [ -d "$BUILD_DIR/bin/Release" ]; then
+              OUTPUT_DIR="$BUILD_DIR/bin/Release"
+            else
+              OUTPUT_DIR="$BUILD_DIR/bin"
+            fi
+            
+            # 确保7z可用
+            if ! command -v 7z &> /dev/null; then
+              echo "Installing 7zip..."
+              choco install 7zip -y
+            fi
+            
+            # 创建ZIP文件
+            7z a "$ARTIFACT_NAME.zip" "$OUTPUT_DIR/*"
             echo "ASSET_NAME=$ARTIFACT_NAME.zip" >> $GITHUB_ENV
             ;;
           macOS)
@@ -63,20 +94,17 @@ jobs:
             echo "ASSET_NAME=$ARTIFACT_NAME.tar.gz" >> $GITHUB_ENV
             ;;
         esac
-    # 新增上传工件步骤
     - name: Upload Build Artifacts
-      if: matrix.build_type == 'RelWithDebInfo'
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.ASSET_NAME }}
         path: ${{ env.ASSET_NAME }}
 
-  # 新增发布草稿版本作业
   create-release:
     name: Create Draft Release
     runs-on: ubuntu-latest
-    needs: build-auto  # 依赖所有构建作业
-    if: github.ref == 'refs/heads/main'  # 仅在主分支触发
+    needs: build-auto
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     steps:
     - name: Download All Artifacts
       uses: actions/download-artifact@v4
@@ -89,8 +117,10 @@ jobs:
         name: "Autobuild #${{ github.run_number }} (${{ github.sha }})"
         body: |
           Automated build from CI
+          - Trigger: ${{ github.event_name }}
           - Commit: ${{ github.sha }}
           - Build ID: ${{ github.run_id }}
+          ${{ github.event_name == 'workflow_dispatch' && format('- Manual trigger by: {0}', github.actor) || '' }}
         draft: true
         prerelease: false
         files: artifacts/*
