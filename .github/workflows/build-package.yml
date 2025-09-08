@@ -2,17 +2,56 @@ name: build-package
 on:
   push:
     paths:
-    - '.github/workflows/build-auto.yml'
+    - '.github/workflows/build-package.yml'
     - 'build.sh'
     - 'laf'
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release type'
+        required: true
+        default: 'nightly'
+        type: choice
+        options:
+        - nightly
+        - stable
+      build_os:
+        description: 'Operating System to build for'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - windows
+        - macos
+        - linux
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'RelWithDebInfo'
+        type: choice
+        options:
+        - RelWithDebInfo
+        - Debug
 jobs:
   build-auto:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-        build_type: [RelWithDebInfo, Debug]
+        # 根据手动输入的参数动态设置矩阵
+        os: ${{ fromJSON(
+          inputs.build_os == 'all' ? 
+          '["windows-latest", "macos-latest", "ubuntu-latest"]' : 
+          (inputs.build_os == 'windows' ? '["windows-latest"]' :
+          (inputs.build_os == 'macos' ? '["macos-latest"]' :
+          '["ubuntu-latest"]'))
+        ) }}
+        build_type: ${{ fromJSON(
+          inputs.build_type == 'all' ?
+          '["RelWithDebInfo", "Debug"]' :
+          '["' + inputs.build_type + '"]'
+        ) }}
     steps:
     - uses: actions/checkout@v4
       with:
@@ -49,25 +88,28 @@ jobs:
         # 创建输出目录
         mkdir -p dist
         
-        # 获取版本信息（假设可以从某个文件中获取）
+        # 获取版本信息
         if [ -f "src/version.h" ]; then
           VERSION=$(grep -oP '(?<=VERSION ")[^"]+' src/version.h | head -1)
         else
           VERSION=$(date +%Y%m%d)
         fi
         
+        # 添加发布类型前缀
+        RELEASE_PREFIX="${{ github.event.inputs.release_type }}"
+        
         # 根据不同操作系统打包
         if [[ "${{ runner.os }}" == "Windows" ]]; then
           # Windows: 打包整个 bin 目录
-          7z a -tzip "dist/aseprite-$VERSION-windows-${{ matrix.build_type }}.zip" "build/bin/*"
+          7z a -tzip "dist/aseprite-$RELEASE_PREFIX-$VERSION-windows-${{ matrix.build_type }}.zip" "build/bin/*"
           
         elif [[ "${{ runner.os }}" == "macOS" ]]; then
           # macOS: 创建 DMG 或直接打包
-          zip -r "dist/aseprite-$VERSION-macos-${{ matrix.build_type }}.zip" "build/bin/Aseprite.app"
+          zip -r "dist/aseprite-$RELEASE_PREFIX-$VERSION-macos-${{ matrix.build_type }}.zip" "build/bin/Aseprite.app"
           
         else
           # Linux: 打包可执行文件和必要的库
-          tar czvf "dist/aseprite-$VERSION-linux-${{ matrix.build_type }}.tar.gz" \
+          tar czvf "dist/aseprite-$RELEASE_PREFIX-$VERSION-linux-${{ matrix.build_type }}.tar.gz" \
             "build/bin/aseprite" \
             "build/bin/lib"*
         fi
@@ -75,23 +117,24 @@ jobs:
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: aseprite-build-${{ runner.os }}-${{ matrix.build_type }}
+        name: aseprite-${{ github.event.inputs.release_type }}-build-${{ runner.os }}-${{ matrix.build_type }}
         path: dist/*
         
     # ===== 发布到 GitHub Releases 草稿 =====
     - name: Create Release Draft
-      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: nightly-${{ github.run_id }}
-        name: Nightly Build (${{ github.run_id }})
+        tag_name: ${{ github.event.inputs.release_type }}-${{ github.run_id }}
+        name: ${{ github.event.inputs.release_type == 'stable' && 'Stable' || 'Nightly' }} Build (${{ github.run_id }})
         body: |
-          Automated nightly build of Aseprite
+          ${{ github.event.inputs.release_type == 'stable' && 'Stable' || 'Nightly' }} build of Aseprite
           - OS: ${{ runner.os }}
           - Build Type: ${{ matrix.build_type }}
           - Commit: ${{ github.sha }}
+          - Trigger: ${{ github.event_name }}
         draft: true
-        prerelease: true
+        prerelease: ${{ github.event.inputs.release_type != 'stable' }}
         files: dist/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
