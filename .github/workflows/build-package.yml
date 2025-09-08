@@ -32,7 +32,7 @@ jobs:
       shell: bash
       run: |
         mkdir -p data
-        git clone https://github.com/aseprite/strings.git data/strings
+        git clone https://github.com/aseprite/strings.git temp-strings
     - name: Install Dependencies
       if: runner.os == 'Linux'
       shell: bash
@@ -48,6 +48,15 @@ jobs:
       shell: bash
       run: |
         bash build.sh --auto --norun
+        
+    - name: Copy strings to data directory
+      shell: bash
+      run: |
+        # 确保data目录存在
+        mkdir -p build/bin/data
+        
+        # 复制strings仓库内容到data/strings
+        cp -r temp-strings build/bin/data/strings    
     - name: Running CLI Tests
       shell: bash
       run: |
