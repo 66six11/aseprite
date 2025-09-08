@@ -9,8 +9,27 @@ on:
   workflow_dispatch:
 
 jobs:
+  get-skia-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+    steps:
+    - name: Get latest Skia version
+      id: get-version
+      uses: actions/github-script@v6
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const { data } = await github.rest.repos.getLatestRelease({
+            owner: 'aseprite',
+            repo: 'skia'
+          });
+          return data.tag_name;
+        result-encoding: string
+
   build-windows:
     runs-on: windows-latest
+    needs: get-skia-version
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -21,18 +40,9 @@ jobs:
       run: |
         choco install cmake ninja -y
 
-    - name: Get latest Skia version
-      id: get-skia-version
-      run: |
-        $response = Invoke-WebRequest -Uri "https://api.github.com/repos/aseprite/skia/releases/latest" -UseBasicParsing
-        $json = $response.Content | ConvertFrom-Json
-        $tagName = $json.tag_name
-        echo "::set-output name=version::$tagName"
-        echo "Latest Skia version: $tagName"
-
     - name: Download Skia for Windows
       run: |
-        $skiaVersion = "${{ steps.get-skia-version.outputs.version }}"
+        $skiaVersion = "${{ needs.get-skia-version.outputs.version }}"
         $skiaUrl = "https://github.com/aseprite/skia/releases/download/$skiaVersion/Skia-Windows-Release-x64.zip"
         
         # 下载文件
@@ -84,6 +94,7 @@ jobs:
 
   build-macos-intel:
     runs-on: macos-latest
+    needs: get-skia-version
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -96,18 +107,9 @@ jobs:
         brew uninstall --ignore-dependencies cmake || true
         brew install cmake ninja
 
-    - name: Get latest Skia version
-      id: get-skia-version
-      run: |
-        $response = Invoke-WebRequest -Uri "https://api.github.com/repos/aseprite/skia/releases/latest" -UseBasicParsing
-        $json = $response.Content | ConvertFrom-Json
-        $tagName = $json.tag_name
-        echo "::set-output name=version::$tagName"
-        echo "Latest Skia version: $tagName"
-
     - name: Download Skia for macOS (Intel)
       run: |
-        SKIA_VERSION="${{ steps.get-skia-version.outputs.version }}"
+        SKIA_VERSION="${{ needs.get-skia-version.outputs.version }}"
         SKIA_URL="https://github.com/aseprite/skia/releases/download/$SKIA_VERSION/Skia-macOS-Release-x64.zip"
         
         # 使用 curl 下载并验证文件大小
@@ -161,6 +163,7 @@ jobs:
 
   build-macos-arm:
     runs-on: macos-latest
+    needs: get-skia-version
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -173,18 +176,9 @@ jobs:
         brew uninstall --ignore-dependencies cmake || true
         brew install cmake ninja
 
-    - name: Get latest Skia version
-      id: get-skia-version
-      run: |
-        $response = Invoke-WebRequest -Uri "https://api.github.com/repos/aseprite/skia/releases/latest" -UseBasicParsing
-        $json = $response.Content | ConvertFrom-Json
-        $tagName = $json.tag_name
-        echo "::set-output name=version::$tagName"
-        echo "Latest Skia version: $tagName"
-
     - name: Download Skia for macOS (ARM)
       run: |
-        SKIA_VERSION="${{ steps.get-skia-version.outputs.version }}"
+        SKIA_VERSION="${{ needs.get-skia-version.outputs.version }}"
         SKIA_URL="https://github.com/aseprite/skia/releases/download/$SKIA_VERSION/Skia-macOS-Release-arm64.zip"
         
         # 使用 curl 下载并验证文件大小
@@ -239,6 +233,7 @@ jobs:
 
   build-linux:
     runs-on: ubuntu-20.04
+    needs: get-skia-version
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -250,18 +245,9 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y clang cmake ninja-build libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev libfontconfig1-dev
 
-    - name: Get latest Skia version
-      id: get-skia-version
-      run: |
-        $response = Invoke-WebRequest -Uri "https://api.github.com/repos/aseprite/skia/releases/latest" -UseBasicParsing
-        $json = $response.Content | ConvertFrom-Json
-        $tagName = $json.tag_name
-        echo "::set-output name=version::$tagName"
-        echo "Latest Skia version: $tagName"
-
     - name: Download Skia for Linux
       run: |
-        SKIA_VERSION="${{ steps.get-skia-version.outputs.version }}"
+        SKIA_VERSION="${{ needs.get-skia-version.outputs.version }}"
         SKIA_URL="https://github.com/aseprite/skia/releases/download/$SKIA_VERSION/Skia-Linux-Release-x64.zip"
         
         # 下载文件
