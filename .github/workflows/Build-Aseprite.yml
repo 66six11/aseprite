@@ -44,6 +44,7 @@ jobs:
       uses: ilammy/msvc-dev-cmd@v1
       with:
         arch: x64
+        vs_version: 2022  # 可选指定版本
 
     - name: Download Skia for Windows
       run: |
