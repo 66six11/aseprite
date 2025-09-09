@@ -103,6 +103,19 @@ jobs:
         cd build
         ninja aseprite
 
+    - name: Add i18n strings (Windows)
+      shell: pwsh
+      run: |
+        $stringsUrl = "https://github.com/aseprite/strings/archive/refs/heads/main.zip"
+        Invoke-WebRequest -Uri $stringsUrl -OutFile "strings.zip"
+        if (Test-Path strings-src) { Remove-Item -Recurse -Force strings-src }
+        New-Item -ItemType Directory -Path "strings-src" | Out-Null
+        Expand-Archive -Path "strings.zip" -DestinationPath "strings-src"
+        $root = Get-ChildItem "strings-src" -Directory | Select-Object -First 1
+        New-Item -ItemType Directory -Path "build/bin/data/strings" -Force | Out-Null
+        Copy-Item -Path (Join-Path $root.FullName '*') -Destination "build/bin/data/strings" -Recurse -Force
+        Write-Host "strings copied to build/bin/data/strings"
+
     - name: Verify no OpenSSL DLL dependency
       shell: pwsh
       run: |
@@ -123,7 +136,7 @@ jobs:
       with:
         name: aseprite-windows
         path: aseprite-windows.zip
-  build-macos-intel:
+  build-macos:
     runs-on: macos-latest
     needs: get-skia-version
     steps:
@@ -193,10 +206,22 @@ jobs:
         cd build
         ninja aseprite
 
+    - name: Add i18n strings (macOS Intel)
+      run: |
+        STRINGS_URL="https://github.com/aseprite/strings/archive/refs/heads/main.zip"
+        curl -L "$STRINGS_URL" -o strings.zip
+        rm -rf strings-src
+        mkdir -p strings-src
+        unzip -q strings.zip -d strings-src
+        ROOT_DIR=$(find strings-src -maxdepth 1 -type d -name "strings-*" | head -n 1)
+        mkdir -p build/bin/data/strings
+        cp -R "$ROOT_DIR"/* build/bin/data/strings/
+        echo "strings copied to build/bin/data/strings"
+
     - name: Package macOS Intel build
       run: |
         # 创建压缩包
-        tar -czvf aseprite-macos-intel.tar.gz -C build/bin .
+        tar -czvf aseprite-macos.tar.gz -C build/bin .
         
     - name: Upload macOS Intel artifact
       uses: actions/upload-artifact@v4
@@ -274,7 +299,18 @@ jobs:
       run: |
         cd build
         ninja aseprite
-
+    - name: Add i18n strings (macOS ARM)
+      run: |
+        STRINGS_URL="https://github.com/aseprite/strings/archive/refs/heads/main.zip"
+        curl -L "$STRINGS_URL" -o strings.zip
+        rm -rf strings-src
+        mkdir -p strings-src
+        unzip -q strings.zip -d strings-src
+        ROOT_DIR=$(find strings-src -maxdepth 1 -type d -name "strings-*" | head -n 1)
+        mkdir -p build/bin/data/strings
+        cp -R "$ROOT_DIR"/* build/bin/data/strings/
+        echo "strings copied to build/bin/data/strings"
+        
     - name: Package macOS ARM build
       run: |
         # 创建压缩包
@@ -349,6 +385,18 @@ jobs:
         cd build
         ninja aseprite
 
+    - name: Add i18n strings (Linux)
+      run: |
+        STRINGS_URL="https://github.com/aseprite/strings/archive/refs/heads/main.zip"
+        wget "$STRINGS_URL" -O strings.zip
+        rm -rf strings-src
+        mkdir -p strings-src
+        unzip -q strings.zip -d strings-src
+        ROOT_DIR=$(find strings-src -maxdepth 1 -type d -name "strings-*" | head -n 1)
+        mkdir -p build/bin/data/strings
+        cp -R "$ROOT_DIR"/* build/bin/data/strings/
+        echo "strings copied to build/bin/data/strings"
+
     - name: Package Linux build
       run: |
         # 创建压缩包
@@ -364,7 +412,7 @@ jobs:
   create-release:
     name: Create Draft Release
     runs-on: ubuntu-latest
-    needs: [build-windows, build-macos-intel, build-macos-arm, build-linux]
+    needs: [build-windows, build-macos, build-macos-arm, build-linux]
     if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     steps:
     - name: Download All Artifacts
@@ -398,7 +446,7 @@ jobs:
         prerelease: false
         files: |
           artifacts/aseprite-windows.zip
-          artifacts/aseprite-macos-intel.tar.gz
+          artifacts/aseprite-macos.tar.gz
           artifacts/aseprite-macos-arm.tar.gz
           artifacts/aseprite-linux.tar.gz
       env:
