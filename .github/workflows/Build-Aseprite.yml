@@ -44,53 +44,24 @@ jobs:
       uses: ilammy/msvc-dev-cmd@v1
       with:
         arch: x64
-        vsversion: 2022  # 正确参数名
+        vsversion: 2022
 
     - name: Download Skia for Windows
       run: |
         $skiaVersion = "${{ needs.get-skia-version.outputs.version }}"
         $skiaUrl = "https://github.com/aseprite/skia/releases/download/$skiaVersion/Skia-Windows-Release-x64.zip"
-        
-        # 下载文件
         Write-Host "Downloading Skia from: $skiaUrl"
         Invoke-WebRequest -Uri $skiaUrl -OutFile "skia-windows.zip"
-        
-        # 检查文件大小
-        $file = Get-Item "skia-windows.zip"
-        if ($file.Length -lt 10000000) {
-            Write-Host "Error: Downloaded file is too small ($($file.Length) bytes). Contents:"
-            Get-Content "skia-windows.zip"
-            exit 1
-        }
-        
-        # 创建目标目录
         New-Item -ItemType Directory -Path "deps" -Force
-        
-        # 解压文件
         Expand-Archive -Path "skia-windows.zip" -DestinationPath "deps/skia"
-        
-        # 验证解压结果
-        if (-not (Test-Path "deps/skia/out/Release-x64")) {
-            Write-Host "Error: Skia extraction failed. Directory structure not found."
-            exit 1
-        }
+        if (-not (Test-Path "deps/skia/out/Release-x64")) { Write-Error "Skia extraction failed"; exit 1 }
 
-    - name: Configure CMake for Windows
+    - name: Configure CMake for Windows (static + WinSSL)
+      shell: pwsh
       run: |
-        # 创建构建目录
-        New-Item -ItemType Directory -Path "build" -Force
+        if (Test-Path build) { Remove-Item -Recurse -Force build }
+        New-Item -ItemType Directory -Path "build" | Out-Null
         cd build
-        
-        # 获取 Windows SDK 路径
-        $sdkPath = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots").KitsRoot10
-        if (-not $sdkPath) {
-            $sdkPath = "C:\\Program Files (x86)\\Windows Kits\\10"
-        }
-        
-        # 转义路径中的反斜杠
-        $sdkPath = $sdkPath.Replace('\', '\\')
-        
-        # 配置 CMake，指定 Windows SDK 版本和路径
         cmake -G Ninja `
           -DCMAKE_BUILD_TYPE=RelWithDebInfo `
           -DLAF_BACKEND=skia `
@@ -103,17 +74,29 @@ jobs:
           -DCMAKE_USE_OPENSSL=OFF `
           -DCMAKE_USE_SCHANNEL=ON `
           ..
-          
+        # 打印 cache 里和 SSL/cURL 相关的开关，确认生效
+        Select-String -Path .\CMakeCache.txt -Pattern 'USE_OPENSSL|USE_SCHANNEL|USE_SHARED_CURL|CURL_STATICLIB|CMAKE_MSVC_RUNTIME_LIBRARY|CMAKE_BUILD_TYPE' | ForEach-Object { $_.Line }
+
     - name: Build with Ninja
       run: |
         cd build
         ninja aseprite
 
+    - name: Verify no OpenSSL DLL dependency
+      shell: pwsh
+      run: |
+        cd build\bin
+        $deps = & dumpbin /DEPENDENTS .\aseprite.exe
+        $deps | Out-Host
+        if ($deps -match 'libcrypto' -or $deps -match 'libssl') {
+          Write-Error "aseprite.exe still depends on OpenSSL DLLs (libcrypto/libssl)."
+          exit 1
+        }
+
     - name: Package Windows build
       run: |
-        # 创建压缩包，直接包含 bin 目录内容
         Compress-Archive -Path build/bin/* -DestinationPath aseprite-windows.zip
-        
+
     - name: Upload Windows artifact
       uses: actions/upload-artifact@v4
       with:
