@@ -27,7 +27,7 @@ jobs:
           return data.tag_name;
         result-encoding: string
 
-build-windows:
+  build-windows:
     runs-on: windows-latest
     needs: get-skia-version
     steps:
