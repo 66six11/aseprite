@@ -27,7 +27,7 @@ jobs:
           return data.tag_name;
         result-encoding: string
 
-  build-windows:
+build-windows:
     runs-on: windows-latest
     needs: get-skia-version
     steps:
@@ -46,17 +46,27 @@ jobs:
         arch: x64
         vsversion: 2022
 
+    - name: Sanitize PATH (remove Git OpenSSL)
+      shell: pwsh
+      run: |
+        $before = $env:Path
+        $paths = $before -split ';' | Where-Object {
+          $_ -and ($_ -notmatch 'Git\\usr\\bin') -and ($_ -notmatch 'Git\\mingw64\\bin') -and ($_ -notmatch 'Git\\bin')
+        }
+        $env:Path = ($paths) -join ';'
+        Write-Host "PATH sanitized."
+
     - name: Download Skia for Windows
       run: |
         $skiaVersion = "${{ needs.get-skia-version.outputs.version }}"
         $skiaUrl = "https://github.com/aseprite/skia/releases/download/$skiaVersion/Skia-Windows-Release-x64.zip"
         Write-Host "Downloading Skia from: $skiaUrl"
         Invoke-WebRequest -Uri $skiaUrl -OutFile "skia-windows.zip"
-        New-Item -ItemType Directory -Path "deps" -Force
+        New-Item -ItemType Directory -Path "deps" -Force | Out-Null
         Expand-Archive -Path "skia-windows.zip" -DestinationPath "deps/skia"
         if (-not (Test-Path "deps/skia/out/Release-x64")) { Write-Error "Skia extraction failed"; exit 1 }
 
-    - name: Configure CMake for Windows (static + WinSSL)
+    - name: Configure CMake for Windows (static + WinSSL, disable OpenSSL)
       shell: pwsh
       run: |
         if (Test-Path build) { Remove-Item -Recurse -Force build }
@@ -64,6 +74,7 @@ jobs:
         cd build
         cmake -G Ninja `
           -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+          -DBUILD_SHARED_LIBS=OFF `
           -DLAF_BACKEND=skia `
           -DSKIA_DIR="${{ github.workspace }}/deps/skia" `
           -DSKIA_LIBRARY_DIR="${{ github.workspace }}/deps/skia/out/Release-x64" `
@@ -71,11 +82,21 @@ jobs:
           -DUSE_SHARED_CURL=OFF `
           -DUSE_SHARED_ZLIB=OFF `
           -DUSE_SHARED_LIBPNG=OFF `
+          -DCURL_STATICLIB=ON `
+          -DHTTP_ONLY=ON `
           -DCMAKE_USE_OPENSSL=OFF `
           -DCMAKE_USE_SCHANNEL=ON `
+          -DCURL_USE_OPENSSL=OFF `
+          -DCURL_USE_SCHANNEL=ON `
+          -DCMAKE_USE_LIBSSH2=OFF `
+          -DCURL_USE_LIBSSH2=OFF `
+          -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON `
           ..
-        # 打印 cache 里和 SSL/cURL 相关的开关，确认生效
-        Select-String -Path .\CMakeCache.txt -Pattern 'USE_OPENSSL|USE_SCHANNEL|USE_SHARED_CURL|CURL_STATICLIB|CMAKE_MSVC_RUNTIME_LIBRARY|CMAKE_BUILD_TYPE' | ForEach-Object { $_.Line }
+        # 打印 cache 里相关开关，确认生效
+        Write-Host "==== SSL/CURL related CMakeCache entries ===="
+        Get-Content .\CMakeCache.txt | Select-String `
+          -Pattern 'CURL_USE_(OPENSSL|SCHANNEL|LIBSSH2)|CURL_SSL_BACKEND|CURL_STATICLIB|HTTP_ONLY|CMAKE_USE_(OPENSSL|SCHANNEL|LIBSSH2)|CMAKE_DISABLE_FIND_PACKAGE_OpenSSL|OPENSSL_' `
+          | ForEach-Object { $_.Line }
 
     - name: Build with Ninja
       run: |
@@ -102,7 +123,6 @@ jobs:
       with:
         name: aseprite-windows
         path: aseprite-windows.zip
-        
   build-macos-intel:
     runs-on: macos-latest
     needs: get-skia-version
