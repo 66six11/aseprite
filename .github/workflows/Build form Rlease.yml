@@ -1,4 +1,4 @@
-name: Build Aseprite
+name: Build Aseprite (Latest Release Source)
 
 on:
   push:
@@ -9,7 +9,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # keep existing job to get latest Skia release used by builds
   get-skia-version:
     runs-on: ubuntu-latest
     outputs:
@@ -28,58 +27,34 @@ jobs:
           return data.tag_name;
         result-encoding: string
 
-  # NEW: fetch the latest Aseprite release and the Source.zip asset URL
   get-aseprite-source:
     runs-on: ubuntu-latest
     outputs:
-      source_url: ${{ steps.get-asset.outputs.result }}
-      source_tag: ${{ steps.get-tag.outputs.result }}
+      tag: ${{ steps.get-src.outputs.tag }}
+      url: ${{ steps.get-src.outputs.url }}
     steps:
-    - name: Get latest Aseprite release tag
-      id: get-tag
+    - name: Get latest Aseprite Source.zip
+      id: get-src
       uses: actions/github-script@v6
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         script: |
-          const { data } = await github.rest.repos.getLatestRelease({
+          const { data: release } = await github.rest.repos.getLatestRelease({
             owner: 'aseprite',
             repo: 'aseprite'
           });
-          return data.tag_name;
-        result-encoding: string
-
-    - name: Get Source.zip asset URL
-      id: get-asset
-      uses: actions/github-script@v6
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          const { data } = await github.rest.repos.getLatestRelease({
-            owner: 'aseprite',
-            repo: 'aseprite'
-          });
-          // Find asset that looks like Source.zip (case-insensitive)
-          const asset = data.assets.find(a => a.name && /source.*\.zip$/i.test(a.name));
-          if (!asset) throw new Error('Source.zip asset not found in latest Aseprite release');
-          return asset.browser_download_url;
-        result-encoding: string
+          const asset = release.assets.find(a => a.name.endsWith('Source.zip'));
+          if (!asset) {
+            core.setFailed('Cannot find Source.zip asset in latest release');
+            return;
+          }
+          core.setOutput('tag', release.tag_name);
+          core.setOutput('url', asset.browser_download_url);
 
   build-windows:
     runs-on: windows-latest
     needs: [get-skia-version, get-aseprite-source]
     steps:
-    - name: Download Aseprite source (Source.zip from latest release)
-      shell: pwsh
-      run: |
-        $srcUrl = "${{ needs.get-aseprite-source.outputs.source_url }}"
-        Write-Host "Downloading Aseprite source from: $srcUrl"
-        Invoke-WebRequest -Uri $srcUrl -OutFile "aseprite-source.zip"
-        Expand-Archive -Path "aseprite-source.zip" -DestinationPath "."
-        $root = Get-ChildItem -Directory | Where-Object { $_.Name -match 'aseprite' } | Select-Object -First 1
-        if (-not $root) { Write-Error "Failed to find extracted source dir"; exit 1 }
-        Set-Location $root.FullName
-        Write-Host "Source extracted to: $PWD"
-
     - name: Install Windows dependencies
       run: |
         choco install cmake ninja -y
@@ -100,7 +75,25 @@ jobs:
         $env:Path = ($paths) -join ';'
         Write-Host "PATH sanitized."
 
+    - name: Download Aseprite Source (latest release)
+      shell: pwsh
+      run: |
+        $url = "${{ needs.get-aseprite-source.outputs.url }}"
+        $tag = "${{ needs.get-aseprite-source.outputs.tag }}"
+        Write-Host "Downloading Aseprite Source from $url (tag: $tag)"
+        Invoke-WebRequest -Uri $url -OutFile aseprite-source.zip
+        if ((Get-Item aseprite-source.zip).Length -lt 5000000) {
+          Write-Error "Source.zip too small, download may have failed."
+          exit 1
+        }
+        Expand-Archive -Path aseprite-source.zip -DestinationPath aseprite-src
+        $extracted = Get-ChildItem aseprite-src -Directory | Select-Object -First 1
+        if (-not $extracted) { Write-Error "Extraction failed"; exit 1 }
+        Rename-Item -Path $extracted.FullName -NewName "src"
+        Write-Host "Source extracted to aseprite-src/src"
+
     - name: Download Skia for Windows
+      shell: pwsh
       run: |
         $skiaVersion = "${{ needs.get-skia-version.outputs.version }}"
         $skiaUrl = "https://github.com/aseprite/skia/releases/download/$skiaVersion/Skia-Windows-Release-x64.zip"
@@ -110,12 +103,12 @@ jobs:
         Expand-Archive -Path "skia-windows.zip" -DestinationPath "deps/skia"
         if (-not (Test-Path "deps/skia/out/Release-x64")) { Write-Error "Skia extraction failed"; exit 1 }
 
-    - name: Configure CMake for Windows (static + WinSSL, disable OpenSSL)
+    - name: Configure CMake (Windows, static, WinSSL)
       shell: pwsh
       run: |
         if (Test-Path build) { Remove-Item -Recurse -Force build }
-        New-Item -ItemType Directory -Path "build" | Out-Null
-        Set-Location build
+        New-Item -ItemType Directory -Path build | Out-Null
+        cd build
         cmake -G Ninja `
           -DCMAKE_BUILD_TYPE=RelWithDebInfo `
           -DBUILD_SHARED_LIBS=OFF `
@@ -135,14 +128,13 @@ jobs:
           -DCMAKE_USE_LIBSSH2=OFF `
           -DCURL_USE_LIBSSH2=OFF `
           -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON `
-          ..
-        # 打印 cache 里相关开关，确认生效
+          ../aseprite-src/src
         Write-Host "==== SSL/CURL related CMakeCache entries ===="
         Get-Content .\CMakeCache.txt | Select-String `
           -Pattern 'CURL_USE_(OPENSSL|SCHANNEL|LIBSSH2)|CURL_SSL_BACKEND|CURL_STATICLIB|HTTP_ONLY|CMAKE_USE_(OPENSSL|SCHANNEL|LIBSSH2)|CMAKE_DISABLE_FIND_PACKAGE_OpenSSL|OPENSSL_' `
           | ForEach-Object { $_.Line }
 
-    - name: Build with Ninja
+    - name: Build (Windows)
       run: |
         cd build
         ninja aseprite
@@ -151,10 +143,10 @@ jobs:
       shell: pwsh
       run: |
         $stringsUrl = "https://github.com/aseprite/strings/archive/refs/heads/main.zip"
-        Invoke-WebRequest -Uri $stringsUrl -OutFile "strings.zip"
+        Invoke-WebRequest -Uri $stringsUrl -OutFile strings.zip
         if (Test-Path strings-src) { Remove-Item -Recurse -Force strings-src }
-        New-Item -ItemType Directory -Path "strings-src" | Out-Null
-        Expand-Archive -Path "strings.zip" -DestinationPath "strings-src"
+        New-Item -ItemType Directory -Path strings-src | Out-Null
+        Expand-Archive -Path strings.zip -DestinationPath strings-src
         $root = Get-ChildItem "strings-src" -Directory | Select-Object -First 1
         New-Item -ItemType Directory -Path "build/bin/data/strings" -Force | Out-Null
         Copy-Item -Path (Join-Path $root.FullName '*') -Destination "build/bin/data/strings" -Recurse -Force
@@ -167,7 +159,7 @@ jobs:
         $deps = & dumpbin /DEPENDENTS .\aseprite.exe
         $deps | Out-Host
         if ($deps -match 'libcrypto' -or $deps -match 'libssl') {
-          Write-Error "aseprite.exe still depends on OpenSSL DLLs (libcrypto/libssl)."
+          Write-Error "aseprite.exe still depends on OpenSSL DLLs."
           exit 1
         }
 
@@ -185,61 +177,45 @@ jobs:
     runs-on: macos-latest
     needs: [get-skia-version, get-aseprite-source]
     steps:
-    - name: Download Aseprite source (Source.zip from latest release)
-      run: |
-        echo "Downloading source from: ${{ needs.get-aseprite-source.outputs.source_url }}"
-        curl -L "${{ needs.get-aseprite-source.outputs.source_url }}" -o aseprite-source.zip
-        unzip -q aseprite-source.zip -d .
-        ROOT_DIR=$(find . -maxdepth 1 -type d -name "aseprite-*" | head -n 1)
-        if [ -z "$ROOT_DIR" ]; then echo "Source dir not found"; exit 1; fi
-        cd "$ROOT_DIR"
-        echo "Source extracted to $(pwd)"
-
     - name: Install macOS dependencies
       run: |
         brew update
         brew uninstall --ignore-dependencies cmake || true
         brew install cmake ninja
 
-    - name: Download Skia for macOS (Intel)
+    - name: Download Aseprite Source (latest release)
+      run: |
+        URL="${{ needs.get-aseprite-source.outputs.url }}"
+        TAG="${{ needs.get-aseprite-source.outputs.tag }}"
+        echo "Downloading Aseprite Source ($TAG) from $URL"
+        curl -L "$URL" -o aseprite-source.zip
+        SIZE=$(stat -f%z aseprite-source.zip)
+        if [ "$SIZE" -lt 5000000 ]; then
+          echo "Source.zip seems too small ($SIZE bytes)."
+          exit 1
+        fi
+        mkdir -p aseprite-src
+        unzip -q aseprite-source.zip -d aseprite-src
+        FIRST_DIR=$(find aseprite-src -maxdepth 1 -type d -name "aseprite*" | head -n 1)
+        mv "$FIRST_DIR" aseprite-src/src
+
+    - name: Download Skia (macOS Intel)
       run: |
         SKIA_VERSION="${{ needs.get-skia-version.outputs.version }}"
         SKIA_URL="https://github.com/aseprite/skia/releases/download/$SKIA_VERSION/Skia-macOS-Release-x64.zip"
-        
-        # 使用 curl 下载并验证文件大小
         echo "Downloading Skia from: $SKIA_URL"
         curl -L "$SKIA_URL" -o skia-macos.zip
-        
-        # 检查文件大小是否合理（至少 10MB）
         FILE_SIZE=$(stat -f%z skia-macos.zip)
-        if [ "$FILE_SIZE" -lt 10000000 ]; then
-            echo "Error: Downloaded file is too small ($FILE_SIZE bytes). Contents:"
-            cat skia-macos.zip
-            exit 1
-        fi
-        
-        # 创建目标目录
+        [ "$FILE_SIZE" -lt 10000000 ] && echo "Skia file too small" && exit 1
         mkdir -p deps/skia
-        
-        # 解压文件
-        unzip skia-macos.zip -d deps/skia
-        
-        # 验证解压结果
-        if [ ! -d "deps/skia/out/Release-x64" ]; then
-            echo "Error: Skia extraction failed. Directory structure not found."
-            exit 1
-        fi
+        unzip -q skia-macos.zip -d deps/skia
+        [ ! -d "deps/skia/out/Release-x64" ] && echo "Skia extraction failed" && exit 1
 
-    - name: Configure CMake for Intel
+    - name: Configure CMake (macOS Intel)
       run: |
-        # 获取 macOS SDK 路径
         SDK_PATH=$(xcrun --show-sdk-path)
-        
-        # 创建构建目录
         mkdir build
         cd build
-        
-        # 配置 CMake
         cmake -G Ninja \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_OSX_ARCHITECTURES=x86_64 \
@@ -249,9 +225,9 @@ jobs:
           -DSKIA_DIR="$GITHUB_WORKSPACE/deps/skia" \
           -DSKIA_LIBRARY_DIR="$GITHUB_WORKSPACE/deps/skia/out/Release-x64" \
           -DSKIA_LIBRARY="$GITHUB_WORKSPACE/deps/skia/out/Release-x64/libskia.a" \
-          ..
+          ../aseprite-src/src
 
-    - name: Build with Ninja
+    - name: Build (macOS Intel)
       run: |
         cd build
         ninja aseprite
@@ -270,9 +246,8 @@ jobs:
 
     - name: Package macOS Intel build
       run: |
-        # 创建压缩包
         tar -czvf aseprite-macos.tar.gz -C build/bin .
-        
+
     - name: Upload macOS Intel artifact
       uses: actions/upload-artifact@v4
       with:
@@ -283,61 +258,42 @@ jobs:
     runs-on: macos-latest
     needs: [get-skia-version, get-aseprite-source]
     steps:
-    - name: Download Aseprite source (Source.zip from latest release)
-      run: |
-        echo "Downloading source from: ${{ needs.get-aseprite-source.outputs.source_url }}"
-        curl -L "${{ needs.get-aseprite-source.outputs.source_url }}" -o aseprite-source.zip
-        unzip -q aseprite-source.zip -d .
-        ROOT_DIR=$(find . -maxdepth 1 -type d -name "aseprite-*" | head -n 1)
-        if [ -z "$ROOT_DIR" ]; then echo "Source dir not found"; exit 1; fi
-        cd "$ROOT_DIR"
-        echo "Source extracted to $(pwd)"
-
     - name: Install macOS dependencies
       run: |
         brew update
         brew uninstall --ignore-dependencies cmake || true
         brew install cmake ninja
 
-    - name: Download Skia for macOS (ARM)
+    - name: Download Aseprite Source (latest release)
+      run: |
+        URL="${{ needs.get-aseprite-source.outputs.url }}"
+        TAG="${{ needs.get-aseprite-source.outputs.tag }}"
+        echo "Downloading Aseprite Source ($TAG) from $URL"
+        curl -L "$URL" -o aseprite-source.zip
+        SIZE=$(stat -f%z aseprite-source.zip)
+        [ "$SIZE" -lt 5000000 ] && echo "Source.zip too small" && exit 1
+        mkdir -p aseprite-src
+        unzip -q aseprite-source.zip -d aseprite-src
+        FIRST_DIR=$(find aseprite-src -maxdepth 1 -type d -name "aseprite*" | head -n 1)
+        mv "$FIRST_DIR" aseprite-src/src
+
+    - name: Download Skia (macOS ARM)
       run: |
         SKIA_VERSION="${{ needs.get-skia-version.outputs.version }}"
         SKIA_URL="https://github.com/aseprite/skia/releases/download/$SKIA_VERSION/Skia-macOS-Release-arm64.zip"
-        
-        # 使用 curl 下载并验证文件大小
         echo "Downloading Skia from: $SKIA_URL"
         curl -L "$SKIA_URL" -o skia-macos-arm.zip
-        
-        # 检查文件大小是否合理（至少 10MB）
         FILE_SIZE=$(stat -f%z skia-macos-arm.zip)
-        if [ "$FILE_SIZE" -lt 10000000 ]; then
-            echo "Error: Downloaded file is too small ($FILE_SIZE bytes). Contents:"
-            cat skia-macos-arm.zip
-            exit 1
-        fi
-        
-        # 创建目标目录
+        [ "$FILE_SIZE" -lt 10000000 ] && echo "Skia file too small" && exit 1
         mkdir -p deps/skia
-        
-        # 解压文件
-        unzip skia-macos-arm.zip -d deps/skia
-        
-        # 验证解压结果
-        if [ ! -d "deps/skia/out/Release-arm64" ]; then
-            echo "Error: Skia extraction failed. Directory structure not found."
-            exit 1
-        fi
+        unzip -q skia-macos-arm.zip -d deps/skia
+        [ ! -d "deps/skia/out/Release-arm64" ] && echo "Skia extraction failed" && exit 1
 
-    - name: Configure CMake for ARM
+    - name: Configure CMake (macOS ARM)
       run: |
-        # 获取 macOS SDK 路径
         SDK_PATH=$(xcrun --show-sdk-path)
-        
-        # 创建构建目录
         mkdir build
         cd build
-        
-        # 配置 CMake
         cmake -G Ninja \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_OSX_ARCHITECTURES=arm64 \
@@ -348,9 +304,9 @@ jobs:
           -DSKIA_LIBRARY_DIR="$GITHUB_WORKSPACE/deps/skia/out/Release-arm64" \
           -DSKIA_LIBRARY="$GITHUB_WORKSPACE/deps/skia/out/Release-arm64/libskia.a" \
           -DPNG_ARM_NEON=on \
-          ..
+          ../aseprite-src/src
 
-    - name: Build with Ninja
+    - name: Build (macOS ARM)
       run: |
         cd build
         ninja aseprite
@@ -366,12 +322,11 @@ jobs:
         mkdir -p build/bin/data/strings
         cp -R "$ROOT_DIR"/* build/bin/data/strings/
         echo "strings copied to build/bin/data/strings"
-        
+
     - name: Package macOS ARM build
       run: |
-        # 创建压缩包
         tar -czvf aseprite-macos-arm.tar.gz -C build/bin .
-        
+
     - name: Upload macOS ARM artifact
       uses: actions/upload-artifact@v4
       with:
@@ -382,66 +337,49 @@ jobs:
     runs-on: ubuntu-latest
     needs: [get-skia-version, get-aseprite-source]
     steps:
-    - name: Download Aseprite source (Source.zip from latest release)
-      run: |
-        echo "Downloading source from: ${{ needs.get-aseprite-source.outputs.source_url }}"
-        wget -q "${{ needs.get-aseprite-source.outputs.source_url }}" -O aseprite-source.zip
-        unzip -q aseprite-source.zip -d .
-        ROOT_DIR=$(find . -maxdepth 1 -type d -name "aseprite-*" | head -n 1)
-        if [ -z "$ROOT_DIR" ]; then echo "Source dir not found"; exit 1; fi
-        cd "$ROOT_DIR"
-        echo "Source extracted to $(pwd)"
-
     - name: Install Linux dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y clang cmake ninja-build libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev libfontconfig1-dev
+        sudo apt-get install -y clang cmake ninja-build libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev libfontconfig1-dev libx11-xcb-dev
 
-    - name: Download Skia for Linux
+    - name: Download Aseprite Source (latest release)
+      run: |
+        URL="${{ needs.get-aseprite-source.outputs.url }}"
+        TAG="${{ needs.get-aseprite-source.outputs.tag }}"
+        echo "Downloading Aseprite Source ($TAG) from $URL"
+        wget "$URL" -O aseprite-source.zip
+        SIZE=$(stat -c%s aseprite-source.zip)
+        [ "$SIZE" -lt 5000000 ] && echo "Source.zip too small" && exit 1
+        mkdir -p aseprite-src
+        unzip -q aseprite-source.zip -d aseprite-src
+        FIRST_DIR=$(find aseprite-src -maxdepth 1 -type d -name "aseprite*" | head -n 1)
+        mv "$FIRST_DIR" aseprite-src/src
+
+    - name: Download Skia (Linux)
       run: |
         SKIA_VERSION="${{ needs.get-skia-version.outputs.version }}"
         SKIA_URL="https://github.com/aseprite/skia/releases/download/$SKIA_VERSION/Skia-Linux-Release-x64.zip"
-        
-        # 下载文件
         echo "Downloading Skia from: $SKIA_URL"
         wget "$SKIA_URL" -O skia-linux.zip
-        
-        # 检查文件大小
         FILE_SIZE=$(stat -c%s skia-linux.zip)
-        if [ "$FILE_SIZE" -lt 10000000 ]; then
-            echo "Error: Downloaded file is too small ($FILE_SIZE bytes). Contents:"
-            cat skia-linux.zip
-            exit 1
-        fi
-        
-        # 创建目标目录
+        [ "$FILE_SIZE" -lt 10000000 ] && echo "Skia file too small" && exit 1
         mkdir -p deps/skia
-        
-        # 解压文件
-        unzip skia-linux.zip -d deps/skia
-        
-        # 验证解压结果
-        if [ ! -d "deps/skia/out/Release-x64" ]; then
-            echo "Error: Skia extraction failed. Directory structure not found."
-            exit 1
-        fi
+        unzip -q skia-linux.zip -d deps/skia
+        [ ! -d "deps/skia/out/Release-x64" ] && echo "Skia extraction failed" && exit 1
 
-    - name: Configure CMake for Linux
-      run: |  
-        # 创建构建目录
+    - name: Configure CMake (Linux)
+      run: |
         mkdir build
         cd build
-        
-        # 配置 CMake
         cmake -G Ninja \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DLAF_BACKEND=skia \
           -DSKIA_DIR=$GITHUB_WORKSPACE/deps/skia \
           -DSKIA_LIBRARY_DIR=$GITHUB_WORKSPACE/deps/skia/out/Release-x64 \
           -DSKIA_LIBRARY=$GITHUB_WORKSPACE/deps/skia/out/Release-x64/libskia.a \
-          ..
+          ../aseprite-src/src
 
-    - name: Build with Ninja
+    - name: Build (Linux)
       run: |
         cd build
         ninja aseprite
@@ -460,16 +398,14 @@ jobs:
 
     - name: Package Linux build
       run: |
-        # 创建压缩包
         tar -czvf aseprite-linux.tar.gz -C build/bin .
-        
+
     - name: Upload Linux artifact
       uses: actions/upload-artifact@v4
       with:
         name: aseprite-linux
         path: aseprite-linux.tar.gz
 
-  # 创建发布作业
   create-release:
     name: Create Draft Release
     runs-on: ubuntu-latest
@@ -481,24 +417,23 @@ jobs:
       with:
         path: artifacts
         merge-multiple: true
-    
+
     - name: Verify Artifacts
       run: |
-        echo "验证压缩包是否存在:"
+        echo "Listing artifacts:"
         ls -la artifacts/
-        echo "检查具体文件:"
-        [ -f "artifacts/aseprite-windows.zip" ] && echo "Windows 压缩包存在" || echo "Windows 压缩包缺失"
-        [ -f "artifacts/aseprite-macos.tar.gz" ] && echo "macOS Intel 压缩包存在" || echo "macOS Intel 压缩包缺失"
-        [ -f "artifacts/aseprite-macos-arm.tar.gz" ] && echo "macOS ARM 压缩包存在" || echo "macOS ARM 压缩包缺失"
-        [ -f "artifacts/aseprite-linux.tar.gz" ] && echo "Linux 压缩包存在" || echo "Linux 压缩包缺失"
-    
+        [ -f "artifacts/aseprite-windows.zip" ] && echo "Windows artifact OK" || echo "Windows artifact MISSING"
+        [ -f "artifacts/aseprite-macos.tar.gz" ] && echo "macOS Intel artifact OK" || echo "macOS Intel artifact MISSING"
+        [ -f "artifacts/aseprite-macos-arm.tar.gz" ] && echo "macOS ARM artifact OK" || echo "macOS ARM artifact MISSING"
+        [ -f "artifacts/aseprite-linux.tar.gz" ] && echo "Linux artifact OK" || echo "Linux artifact MISSING"
+
     - name: Create Draft Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: auto-build-${{ github.run_id }}
         name: "Autobuild #${{ github.run_number }} (${{ github.sha }})"
         body: |
-          Automated build from CI      
+          Automated build from CI
           - Trigger: ${{ github.event_name }}
           - Commit: ${{ github.sha }}
           - Build ID: ${{ github.run_id }}
