@@ -790,7 +790,15 @@ void Editor::drawOneSpriteUnclippedRect(ui::Graphics* g,
       else
         p.blendMode(os::BlendMode::Src);
 
-      g->drawSurface(rendered.get(), gfx::Rect(0, 0, rc2.w, rc2.h), dest, sampling, &p);
+      gfx::Rect destClip = dest;
+      if (m_proj.scaleX() < 1.0)
+        --destClip.w;
+      if (m_proj.scaleY() < 1.0)
+        --destClip.h;
+
+      IntersectClip clip(g, destClip);
+      if (clip)
+        g->drawSurface(rendered.get(), gfx::Rect(0, 0, rc2.w, rc2.h), dest, sampling, &p);
     }
     else {
       g->drawSurface(rendered.get(),
@@ -2763,7 +2771,7 @@ void Editor::pasteImage(const Image* image, const Mask* mask, const gfx::Point* 
   ASSERT(image);
 
   std::unique_ptr<Mask> temp_mask;
-  if (!mask) {
+  if (!mask || mask->bounds().isEmpty()) {
     gfx::Rect visibleBounds = getVisibleSpriteBounds();
     gfx::Rect imageBounds = image->bounds();
 

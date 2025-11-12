@@ -2526,7 +2526,7 @@ void Timeline::drawCel(ui::Graphics* g,
 
     if (!thumb_bounds.isEmpty()) {
       if (os::SurfaceRef surface =
-            thumb::get_cel_thumbnail(cel, m_scaleUpToFit, thumb_bounds.size())) {
+            thumb::get_cel_thumbnail(g->display(), cel, m_scaleUpToFit, thumb_bounds.size())) {
         const int t = std::clamp(thumb_bounds.w / 8, 4, 16);
         draw_checkered_grid(g, thumb_bounds, gfx::Size(t, t), docPref());
 
@@ -2618,7 +2618,8 @@ void Timeline::drawCelOverlay(ui::Graphics* g)
     return;
 
   gfx::Rect rc = m_sprite->bounds().fitIn(gfx::Rect(m_thumbnailsOverlayBounds).shrink(1));
-  if (os::SurfaceRef surface = thumb::get_cel_thumbnail(cel, m_scaleUpToFit, rc.size())) {
+  if (os::SurfaceRef surface =
+        thumb::get_cel_thumbnail(g->display(), cel, m_scaleUpToFit, rc.size())) {
     draw_checkered_grid(g, rc, gfx::Size(8, 8) * ui::guiscale(), docPref());
 
     g->drawRgbaSurface(surface.get(),
@@ -2885,7 +2886,8 @@ void Timeline::drawRangeOutline(ui::Graphics* g)
   switch (m_dropRange.type()) {
     case Range::kCels: {
       gfx::Rect outlineBounds(dropBounds);
-      outlineBounds.enlarge(outlineWidth());
+      const int s = outlineWidth();
+      outlineBounds.enlarge(gfx::Border(s - guiscale(), s - guiscale(), s, s));
       info.styleFlags = ui::Style::Layer::kFocus;
       theme()->paintWidgetPart(g, styles.timelineRangeOutline(), outlineBounds, info);
 
@@ -4630,13 +4632,13 @@ void Timeline::onDrop(ui::DragEvent& e)
       std::string txmsg;
       std::unique_ptr<docapi::DocProvider> docProvider = nullptr;
       if (droppedImage) {
-        txmsg = "Dropped image on timeline";
+        txmsg = "Drop Image";
         doc::ImageRef image = nullptr;
         convert_surface_to_image(surface.get(), 0, 0, surface->width(), surface->height(), image);
         docProvider = std::make_unique<DocProviderFromImage>(image);
       }
       else {
-        txmsg = "Dropped paths on timeline";
+        txmsg = "Drop File";
         docProvider = std::make_unique<DocProviderFromPaths>(m_document->context(), paths);
       }
 
