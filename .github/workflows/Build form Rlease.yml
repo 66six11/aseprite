@@ -202,14 +202,19 @@ jobs:
         TAG="${{ needs.get-aseprite-source.outputs.tag }}"
         echo "Downloading Aseprite Source ($TAG) from $URL"
         curl -L "$URL" -o aseprite-source.zip
-        SIZE=$(stat -f%z aseprite-source.zip)
+        SIZE=$(stat -f%z aseprite-source.zip || echo 0)
+        echo "Source.zip size: $SIZE bytes"
         if [ "$SIZE" -lt 5000000 ]; then
           echo "Source.zip seems too small ($SIZE bytes)."
           exit 1
         fi
         rm -rf aseprite-src
         mkdir -p aseprite-src
-        unzip -q aseprite-source.zip -d aseprite-src
+        if ! unzip -q aseprite-source.zip -d aseprite-src; then
+          echo "unzip of source failed; listing archive:"
+          unzip -l aseprite-source.zip || true
+          exit 1
+        fi
 
         if [ -f "aseprite-src/CMakeLists.txt" ]; then
           SRC_DIR="$GITHUB_WORKSPACE/aseprite-src"
@@ -220,6 +225,7 @@ jobs:
           done
           if [ -z "$SRC_DIR" ]; then
             echo "Couldn't locate source root (CMakeLists.txt) after extraction."
+            find aseprite-src -maxdepth 2 -type f -name CMakeLists.txt || true
             exit 1
           fi
         fi
@@ -232,11 +238,23 @@ jobs:
         SKIA_URL="https://github.com/aseprite/skia/releases/download/$SKIA_VERSION/Skia-macOS-Release-x64.zip"
         echo "Downloading Skia from: $SKIA_URL"
         curl -L "$SKIA_URL" -o skia-macos.zip
-        FILE_SIZE=$(stat -f%z skia-macos.zip)
-        [ "$FILE_SIZE" -lt 10000000 ] && echo "Skia file too small" && exit 1
+        FILE_SIZE=$(stat -f%z skia-macos.zip || echo 0)
+        echo "Skia zip size: $FILE_SIZE bytes"
+        if [ "$FILE_SIZE" -lt 10000000 ]; then
+          echo "Skia file too small"
+          exit 1
+        fi
         mkdir -p deps/skia
-        unzip -q skia-macos.zip -d deps/skia
-        [ ! -d "deps/skia/out/Release-x64" ] && echo "Skia extraction failed" && exit 1
+        if ! unzip -q skia-macos.zip -d deps/skia; then
+          echo "unzip failed; listing archive:"
+          unzip -l skia-macos.zip || true
+          exit 1
+        fi
+        if [ ! -d "deps/skia/out/Release-x64" ]; then
+          echo "Skia extraction failed; expected deps/skia/out/Release-x64"
+          ls -R deps/skia || true
+          exit 1
+        fi
 
     - name: Configure CMake (macOS Intel)
       run: |
@@ -297,11 +315,19 @@ jobs:
         TAG="${{ needs.get-aseprite-source.outputs.tag }}"
         echo "Downloading Aseprite Source ($TAG) from $URL"
         curl -L "$URL" -o aseprite-source.zip
-        SIZE=$(stat -f%z aseprite-source.zip)
-        [ "$SIZE" -lt 5000000 ] && echo "Source.zip too small" && exit 1
+        SIZE=$(stat -f%z aseprite-source.zip || echo 0)
+        echo "Source.zip size: $SIZE bytes"
+        if [ "$SIZE" -lt 5000000 ]; then
+          echo "Source.zip too small"
+          exit 1
+        fi
         rm -rf aseprite-src
         mkdir -p aseprite-src
-        unzip -q aseprite-source.zip -d aseprite-src
+        if ! unzip -q aseprite-source.zip -d aseprite-src; then
+          echo "unzip of source failed; listing archive:"
+          unzip -l aseprite-source.zip || true
+          exit 1
+        fi
 
         if [ -f "aseprite-src/CMakeLists.txt" ]; then
           SRC_DIR="$GITHUB_WORKSPACE/aseprite-src"
@@ -312,6 +338,7 @@ jobs:
           done
           if [ -z "$SRC_DIR" ]; then
             echo "Couldn't locate source root (CMakeLists.txt) after extraction."
+            find aseprite-src -maxdepth 2 -type f -name CMakeLists.txt || true
             exit 1
           fi
         fi
@@ -324,11 +351,23 @@ jobs:
         SKIA_URL="https://github.com/aseprite/skia/releases/download/$SKIA_VERSION/Skia-macOS-Release-arm64.zip"
         echo "Downloading Skia from: $SKIA_URL"
         curl -L "$SKIA_URL" -o skia-macos-arm.zip
-        FILE_SIZE=$(stat -f%z skia-macos-arm.zip)
-        [ "$FILE_SIZE" -lt 10000000 ] && echo "Skia file too small" && exit 1
+        FILE_SIZE=$(stat -f%z skia-macos-arm.zip || echo 0)
+        echo "Skia zip size: $FILE_SIZE bytes"
+        if [ "$FILE_SIZE" -lt 10000000 ]; then
+          echo "Skia file too small"
+          exit 1
+        fi
         mkdir -p deps/skia
-        unzip -q skia-macos-arm.zip -d deps/skia
-        [ ! -d "deps/skia/out/Release-arm64" ] && echo "Skia extraction failed" && exit 1
+        if ! unzip -q skia-macos-arm.zip -d deps/skia; then
+          echo "unzip failed; listing archive:"
+          unzip -l skia-macos-arm.zip || true
+          exit 1
+        fi
+        if [ ! -d "deps/skia/out/Release-arm64" ]; then
+          echo "Skia extraction failed; expected deps/skia/out/Release-arm64"
+          ls -R deps/skia || true
+          exit 1
+        fi
 
     - name: Configure CMake (macOS ARM)
       run: |
@@ -381,19 +420,23 @@ jobs:
     - name: Install Linux dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y clang cmake ninja-build libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev libfontconfig1-dev libx11-xcb-dev
+        sudo apt-get install -y clang cmake ninja-build libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev libfontconfig1-dev libx11-xcb-dev unzip
 
     - name: Download Aseprite Source (latest release)
       run: |
+        set -euo pipefail
         URL="${{ needs.get-aseprite-source.outputs.url }}"
         TAG="${{ needs.get-aseprite-source.outputs.tag }}"
         echo "Downloading Aseprite Source ($TAG) from $URL"
-        wget "$URL" -O aseprite-source.zip
-        SIZE=$(stat -c%s aseprite-source.zip)
-        [ "$SIZE" -lt 5000000 ] && echo "Source.zip too small" && exit 1
+        wget -q --show-progress "$URL" -O aseprite-source.zip
+        SIZE=$(stat -c%s aseprite-source.zip || echo 0)
+        echo "Source.zip size: $SIZE bytes"
+        if [ "$SIZE" -lt 5000000 ]; then
+          echo "Source.zip too small ($SIZE bytes)"; ls -l aseprite-source.zip || true; exit 1
+        fi
         rm -rf aseprite-src
         mkdir -p aseprite-src
-        unzip -q aseprite-source.zip -d aseprite-src
+        unzip -q aseprite-source.zip -d aseprite-src || { echo "unzip of source failed"; exit 1; }
 
         if [ -f "aseprite-src/CMakeLists.txt" ]; then
           SRC_DIR="$GITHUB_WORKSPACE/aseprite-src"
@@ -404,6 +447,7 @@ jobs:
           done
           if [ -z "$SRC_DIR" ]; then
             echo "Couldn't locate source root (CMakeLists.txt) after extraction."
+            find aseprite-src -maxdepth 2 -type f -name CMakeLists.txt || true
             exit 1
           fi
         fi
@@ -412,18 +456,28 @@ jobs:
 
     - name: Download Skia (Linux)
       run: |
+        set -euo pipefail
         SKIA_VERSION="${{ needs.get-skia-version.outputs.version }}"
         SKIA_URL="https://github.com/aseprite/skia/releases/download/$SKIA_VERSION/Skia-Linux-Release-x64.zip"
         echo "Downloading Skia from: $SKIA_URL"
-        wget "$SKIA_URL" -O skia-linux.zip
-        FILE_SIZE=$(stat -c%s skia-linux.zip)
-        [ "$FILE_SIZE" -lt 10000000 ] && echo "Skia file too small" && exit 1
+        wget -q --show-progress "$SKIA_URL" -O skia-linux.zip
+        FILE_SIZE=$(stat -c%s skia-linux.zip || echo 0)
+        echo "Skia zip size: $FILE_SIZE bytes"
+        if [ "$FILE_SIZE" -lt 10000000 ]; then
+          echo "Skia file too small ($FILE_SIZE bytes)"
+          exit 1
+        fi
         mkdir -p deps/skia
-        unzip -q skia-linux.zip -d deps/skia
-        [ ! -d "deps/skia/out/Release-x64" ] && echo "Skia extraction failed" && exit 1
+        unzip -q skia-linux.zip -d deps/skia || { echo "unzip of Skia failed"; exit 1; }
+        if [ ! -d "deps/skia/out/Release-x64" ]; then
+          echo "Skia extraction failed. Directory deps/skia/out/Release-x64 not found."
+          ls -R deps/skia || true
+          exit 1
+        fi
 
     - name: Configure CMake (Linux)
       run: |
+        set -euo pipefail
         mkdir -p build
         cd build
         cmake -G Ninja \
@@ -442,7 +496,7 @@ jobs:
     - name: Add i18n strings (Linux)
       run: |
         STRINGS_URL="https://github.com/aseprite/strings/archive/refs/heads/main.zip"
-        wget "$STRINGS_URL" -O strings.zip
+        wget -q --show-progress "$STRINGS_URL" -O strings.zip
         rm -rf strings-src
         mkdir -p strings-src
         unzip -q strings.zip -d strings-src
