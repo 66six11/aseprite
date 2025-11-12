@@ -86,11 +86,24 @@ jobs:
           Write-Error "Source.zip too small, download may have failed."
           exit 1
         }
+        if (Test-Path aseprite-src) { Remove-Item -Recurse -Force aseprite-src }
+        New-Item -ItemType Directory -Path aseprite-src | Out-Null
         Expand-Archive -Path aseprite-source.zip -DestinationPath aseprite-src
-        $extracted = Get-ChildItem aseprite-src -Directory | Select-Object -First 1
-        if (-not $extracted) { Write-Error "Extraction failed"; exit 1 }
-        Rename-Item -Path $extracted.FullName -NewName "src"
-        Write-Host "Source extracted to aseprite-src/src"
+
+        $rootPath = (Resolve-Path 'aseprite-src').Path
+        $cmakeAtRoot = Test-Path (Join-Path $rootPath 'CMakeLists.txt')
+        if ($cmakeAtRoot) {
+          $srcDir = $rootPath
+        } else {
+          $candidate = Get-ChildItem "aseprite-src" -Directory | Where-Object { Test-Path (Join-Path $_.FullName "CMakeLists.txt") } | Select-Object -First 1
+          if ($null -eq $candidate) {
+            Write-Error "Couldn't locate source root (CMakeLists.txt) after extraction."
+            exit 1
+          }
+          $srcDir = $candidate.FullName
+        }
+        "SRC_DIR=$srcDir" | Out-File -FilePath $env:GITHUB_ENV -Append
+        Write-Host "Source root: $srcDir"
 
     - name: Download Skia for Windows
       shell: pwsh
@@ -128,7 +141,7 @@ jobs:
           -DCMAKE_USE_LIBSSH2=OFF `
           -DCURL_USE_LIBSSH2=OFF `
           -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON `
-          ../aseprite-src/src
+          "$env:SRC_DIR"
         Write-Host "==== SSL/CURL related CMakeCache entries ===="
         Get-Content .\CMakeCache.txt | Select-String `
           -Pattern 'CURL_USE_(OPENSSL|SCHANNEL|LIBSSH2)|CURL_SSL_BACKEND|CURL_STATICLIB|HTTP_ONLY|CMAKE_USE_(OPENSSL|SCHANNEL|LIBSSH2)|CMAKE_DISABLE_FIND_PACKAGE_OpenSSL|OPENSSL_' `
@@ -194,10 +207,24 @@ jobs:
           echo "Source.zip seems too small ($SIZE bytes)."
           exit 1
         fi
+        rm -rf aseprite-src
         mkdir -p aseprite-src
         unzip -q aseprite-source.zip -d aseprite-src
-        FIRST_DIR=$(find aseprite-src -maxdepth 1 -type d -name "aseprite*" | head -n 1)
-        mv "$FIRST_DIR" aseprite-src/src
+
+        if [ -f "aseprite-src/CMakeLists.txt" ]; then
+          SRC_DIR="$GITHUB_WORKSPACE/aseprite-src"
+        else
+          SRC_DIR=""
+          for d in aseprite-src/*/; do
+            [ -f "$d/CMakeLists.txt" ] && SRC_DIR="$GITHUB_WORKSPACE/${d%/}" && break
+          done
+          if [ -z "$SRC_DIR" ]; then
+            echo "Couldn't locate source root (CMakeLists.txt) after extraction."
+            exit 1
+          fi
+        fi
+        echo "SRC_DIR=$SRC_DIR" >> "$GITHUB_ENV"
+        echo "Source root: $SRC_DIR"
 
     - name: Download Skia (macOS Intel)
       run: |
@@ -214,7 +241,7 @@ jobs:
     - name: Configure CMake (macOS Intel)
       run: |
         SDK_PATH=$(xcrun --show-sdk-path)
-        mkdir build
+        mkdir -p build
         cd build
         cmake -G Ninja \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -225,7 +252,7 @@ jobs:
           -DSKIA_DIR="$GITHUB_WORKSPACE/deps/skia" \
           -DSKIA_LIBRARY_DIR="$GITHUB_WORKSPACE/deps/skia/out/Release-x64" \
           -DSKIA_LIBRARY="$GITHUB_WORKSPACE/deps/skia/out/Release-x64/libskia.a" \
-          ../aseprite-src/src
+          "$SRC_DIR"
 
     - name: Build (macOS Intel)
       run: |
@@ -272,10 +299,24 @@ jobs:
         curl -L "$URL" -o aseprite-source.zip
         SIZE=$(stat -f%z aseprite-source.zip)
         [ "$SIZE" -lt 5000000 ] && echo "Source.zip too small" && exit 1
+        rm -rf aseprite-src
         mkdir -p aseprite-src
         unzip -q aseprite-source.zip -d aseprite-src
-        FIRST_DIR=$(find aseprite-src -maxdepth 1 -type d -name "aseprite*" | head -n 1)
-        mv "$FIRST_DIR" aseprite-src/src
+
+        if [ -f "aseprite-src/CMakeLists.txt" ]; then
+          SRC_DIR="$GITHUB_WORKSPACE/aseprite-src"
+        else
+          SRC_DIR=""
+          for d in aseprite-src/*/; do
+            [ -f "$d/CMakeLists.txt" ] && SRC_DIR="$GITHUB_WORKSPACE/${d%/}" && break
+          done
+          if [ -z "$SRC_DIR" ]; then
+            echo "Couldn't locate source root (CMakeLists.txt) after extraction."
+            exit 1
+          fi
+        fi
+        echo "SRC_DIR=$SRC_DIR" >> "$GITHUB_ENV"
+        echo "Source root: $SRC_DIR"
 
     - name: Download Skia (macOS ARM)
       run: |
@@ -292,7 +333,7 @@ jobs:
     - name: Configure CMake (macOS ARM)
       run: |
         SDK_PATH=$(xcrun --show-sdk-path)
-        mkdir build
+        mkdir -p build
         cd build
         cmake -G Ninja \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -304,7 +345,7 @@ jobs:
           -DSKIA_LIBRARY_DIR="$GITHUB_WORKSPACE/deps/skia/out/Release-arm64" \
           -DSKIA_LIBRARY="$GITHUB_WORKSPACE/deps/skia/out/Release-arm64/libskia.a" \
           -DPNG_ARM_NEON=on \
-          ../aseprite-src/src
+          "$SRC_DIR"
 
     - name: Build (macOS ARM)
       run: |
@@ -350,10 +391,24 @@ jobs:
         wget "$URL" -O aseprite-source.zip
         SIZE=$(stat -c%s aseprite-source.zip)
         [ "$SIZE" -lt 5000000 ] && echo "Source.zip too small" && exit 1
+        rm -rf aseprite-src
         mkdir -p aseprite-src
         unzip -q aseprite-source.zip -d aseprite-src
-        FIRST_DIR=$(find aseprite-src -maxdepth 1 -type d -name "aseprite*" | head -n 1)
-        mv "$FIRST_DIR" aseprite-src/src
+
+        if [ -f "aseprite-src/CMakeLists.txt" ]; then
+          SRC_DIR="$GITHUB_WORKSPACE/aseprite-src"
+        else
+          SRC_DIR=""
+          for d in aseprite-src/*/; do
+            [ -f "$d/CMakeLists.txt" ] && SRC_DIR="$GITHUB_WORKSPACE/${d%/}" && break
+          done
+          if [ -z "$SRC_DIR" ]; then
+            echo "Couldn't locate source root (CMakeLists.txt) after extraction."
+            exit 1
+          fi
+        fi
+        echo "SRC_DIR=$SRC_DIR" >> "$GITHUB_ENV"
+        echo "Source root: $SRC_DIR"
 
     - name: Download Skia (Linux)
       run: |
@@ -369,7 +424,7 @@ jobs:
 
     - name: Configure CMake (Linux)
       run: |
-        mkdir build
+        mkdir -p build
         cd build
         cmake -G Ninja \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -377,7 +432,7 @@ jobs:
           -DSKIA_DIR=$GITHUB_WORKSPACE/deps/skia \
           -DSKIA_LIBRARY_DIR=$GITHUB_WORKSPACE/deps/skia/out/Release-x64 \
           -DSKIA_LIBRARY=$GITHUB_WORKSPACE/deps/skia/out/Release-x64/libskia.a \
-          ../aseprite-src/src
+          "$SRC_DIR"
 
     - name: Build (Linux)
       run: |
