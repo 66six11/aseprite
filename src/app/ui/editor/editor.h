@@ -44,6 +44,7 @@
 
 namespace doc {
 class Layer;
+class MaskBoundaries;
 class Sprite;
 } // namespace doc
 namespace gfx {
@@ -317,6 +318,13 @@ public:
   // an Editor or EditorState event.
   void showUnhandledException(const std::exception& ex, const ui::Message* msg);
 
+  Mask* getSelectionToolMask() { return m_selectionToolMask.get(); }
+  void makeSelectionToolMask();
+  void deleteSelectionToolMask();
+  bool hasSelectionToolMask();
+
+  const TiledModeHelper& getTiledModeHelper() const { return m_tiledModeHelper; }
+
   static void registerCommands();
 
 protected:
@@ -353,7 +361,7 @@ private:
   enum class Flashing { None, WithFlashExtraCel, WaitingDeferedPaint };
 
   void setStateInternal(const EditorStatePtr& newState);
-  void updateQuicktool();
+  void updateQuicktool(const ui::Message* msg);
   void updateToolByTipProximity(ui::PointerType pointerType);
 
   // firstFromMouseDown=true when we call this function from the
@@ -364,6 +372,7 @@ private:
   void drawSpriteUnclippedRect(ui::Graphics* g, const gfx::Rect& rc);
   void drawMaskSafe();
   void drawMask(ui::Graphics* g);
+  void drawMaskBoundaries(ui::Graphics* g, doc::MaskBoundaries& segs, int antsOffset = 0);
   void drawGrid(ui::Graphics* g,
                 const gfx::Rect& spriteBounds,
                 const gfx::Rect& gridBounds,
@@ -513,6 +522,11 @@ private:
   // same document can show the same preview image/stroke being drawn
   // (search for Render::setPreviewImage()).
   static std::unique_ptr<EditorRender> m_renderEngine;
+
+  // Used for selection tool feedback.
+  // TODO move this to SelectionToolLoopImpl
+  static std::unique_ptr<doc::Mask> m_selectionToolMask;
+  static std::unique_ptr<doc::MaskBoundaries> m_selectionToolMaskBoundaries;
 };
 
 } // namespace app

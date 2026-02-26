@@ -135,6 +135,8 @@ private:
 
 // static
 Editor* Editor::m_activeEditor = nullptr;
+std::unique_ptr<Mask> Editor::m_selectionToolMask = nullptr;
+std::unique_ptr<MaskBoundaries> Editor::m_selectionToolMaskBoundaries = nullptr;
 
 // static
 std::unique_ptr<EditorRender> Editor::m_renderEngine = nullptr;
@@ -988,6 +990,13 @@ void Editor::drawSpriteUnclippedRect(ui::Graphics* g, const gfx::Rect& _rc)
                        m_proj.applyY(m_sprite->height()));
   gfx::Rect enclosingRect = spriteRect;
 
+  // Redraw the background when the selection tool mask draws over it
+  static bool redrawBackground = false;
+  if (redrawBackground) {
+    drawBackground(g);
+    redrawBackground = false;
+  }
+
   // Draw the main sprite at the center.
   drawOneSpriteUnclippedRect(g, rc, 0, 0);
 
@@ -1038,9 +1047,20 @@ void Editor::drawSpriteUnclippedRect(ui::Graphics* g, const gfx::Rect& _rc)
     }
   }
 
-  // Draw the mask
+  // Draw the current selection mask
   if (m_document->hasMaskBoundaries())
     drawMask(g);
+
+  // If we are in a selection tool and the user has the new selection
+  // feedback...
+  if (hasSelectionToolMask()) {
+    m_selectionToolMaskBoundaries->regen(m_selectionToolMask.get());
+    drawMaskBoundaries(g, *m_selectionToolMaskBoundaries, 0);
+
+    const gfx::Point prevPoint(m_selectionToolMask->bounds().point2());
+    if (prevPoint.x >= m_sprite->width() || prevPoint.y >= m_sprite->height())
+      redrawBackground = true;
+  }
 
   // Post-render decorator.
   if ((m_flags & kShowDecorators) && m_decorator) {
@@ -1056,7 +1076,7 @@ void Editor::drawSpriteClipped(const gfx::Region& updateRegion)
 
   Display* display = this->display();
   // TODO clip the editorGraphics directly
-  Graphics backGraphics(display, display->backLayer()->surface(), 0, 0);
+  Graphics backGraphics(display);
   GraphicsPtr editorGraphics = getGraphics(clientBounds());
 
   for (const Rect& updateRect : updateRegion) {
@@ -1068,13 +1088,7 @@ void Editor::drawSpriteClipped(const gfx::Region& updateRegion)
   }
 }
 
-/**
- * Draws the boundaries, really this routine doesn't use the "mask"
- * field of the sprite, only the "bound" field (so you can have other
- * mask in the sprite and could be showed other boundaries), to
- * regenerate boundaries, use the sprite_generate_mask_boundaries()
- * routine.
- */
+// Draws the current sprite mask boundaries (the active selection).
 void Editor::drawMask(Graphics* g)
 {
   if ((m_flags & kShowMask) == 0 || !m_docPref.show.selectionEdges())
@@ -1082,18 +1096,22 @@ void Editor::drawMask(Graphics* g)
 
   ASSERT(m_document->hasMaskBoundaries());
 
+  drawMaskBoundaries(g, m_document->maskBoundaries(), m_antsOffset);
+}
+
+void Editor::drawMaskBoundaries(ui::Graphics* g, doc::MaskBoundaries& segs, const int antsOffset)
+{
   gfx::Point pt = mainTilePosition();
   pt.x = m_padding.x + m_proj.applyX(pt.x);
   pt.y = m_padding.y + m_proj.applyY(pt.y);
 
   // Create the mask boundaries path
-  auto& segs = m_document->maskBoundaries();
   segs.createPathIfNeeeded();
 
   ui::Paint paint;
   paint.style(ui::Paint::Stroke);
   set_checkered_paint_mode(paint,
-                           m_antsOffset,
+                           antsOffset,
                            gfx::rgba(0, 0, 0, 255),
                            gfx::rgba(255, 255, 255, 255));
 
@@ -1107,10 +1125,11 @@ void Editor::drawMask(Graphics* g)
 
 void Editor::drawMaskSafe()
 {
-  if ((m_flags & kShowMask) == 0)
+  if (((m_flags & kShowMask) == 0 && !hasSelectionToolMask()) || !(isVisible() && m_document))
     return;
 
-  if (isVisible() && m_document && m_document->hasMaskBoundaries()) {
+  const bool haveSegs = m_document->hasMaskBoundaries();
+  if (haveSegs || hasSelectionToolMask()) {
     Region region;
     getDrawableRegion(region, kCutTopWindows);
     region.offset(-bounds().origin());
@@ -1118,10 +1137,21 @@ void Editor::drawMaskSafe()
     HideBrushPreview hide(m_brushPreview);
     GraphicsPtr g = getGraphics(clientBounds());
 
-    for (const gfx::Rect& rc : region) {
-      IntersectClip clip(g.get(), rc);
-      if (clip)
-        drawMask(g.get());
+    if (haveSegs) {
+      for (const gfx::Rect& rc : region) {
+        IntersectClip clip(g.get(), rc);
+        if (clip)
+          drawMask(g.get());
+      }
+    }
+
+    if (hasSelectionToolMask()) {
+      m_selectionToolMaskBoundaries->regen(m_selectionToolMask.get());
+      for (const gfx::Rect& rc : region) {
+        IntersectClip clip(g.get(), rc);
+        if (clip)
+          drawMaskBoundaries(g.get(), *m_selectionToolMaskBoundaries, 0);
+      }
     }
   }
 }
@@ -1742,28 +1772,54 @@ void Editor::updateStatusBar()
   m_state->onUpdateStatusBar(this);
 }
 
-void Editor::updateQuicktool()
+void Editor::updateQuicktool(const ui::Message* msg)
 {
   if (m_customizationDelegate && !hasCapture()) {
     auto atm = App::instance()->activeToolManager();
-    tools::Tool* selectedTool = atm->selectedTool();
+    const tools::Tool* selectedTool = atm->selectedTool();
 
     // Don't change quicktools if we are in a selection tool and using
-    // the selection modifiers.
-    if (selectedTool->getInk(0)->isSelection() &&
-        int(m_customizationDelegate->getPressedKeyAction(KeyContext::SelectionTool)) != 0) {
-      if (atm->quickTool())
-        atm->newQuickToolSelectedFromEditor(nullptr);
-      return;
+    // the selection modifiers (or Ctrl key to start a copy of the
+    // selection).
+    if (selectedTool->getInk(0)->isSelection()) {
+      if ((int(m_customizationDelegate->getPressedKeyAction(KeyContext::SelectionTool)) != 0) ||
+          (int(m_customizationDelegate->getPressedKeyAction(KeyContext::TranslatingSelection)) &
+           int(KeyAction::CopySelection))) {
+        if (atm->quickTool())
+          atm->newQuickToolSelectedFromEditor(nullptr);
+        return;
+      }
     }
 
-    tools::Tool* newQuicktool = m_customizationDelegate->getQuickTool(selectedTool);
+    ui::Shortcut newShortcut;
+    tools::Tool* newQuicktool =
+      m_customizationDelegate->getQuickTool(msg, selectedTool, newShortcut);
 
     // Check if the current state accept the given quicktool.
     if (newQuicktool && !m_state->acceptQuickTool(newQuicktool))
       return;
 
-    atm->newQuickToolSelectedFromEditor(newQuicktool);
+    tools::Tool* prevQuicktool = atm->quickTool();
+    ui::Shortcut prevShortcut = atm->quickToolFromShortcut();
+
+    // Problems appear when the previous shortcut to select the
+    // current quick tool is still pressed, so we have to disambiguate
+    // the new pressed shortcut (newShortcut) with the previous
+    // shortcut (prevQuicktool).
+    if (prevQuicktool && prevShortcut != newShortcut && prevShortcut.isPressed()) {
+      if (!newQuicktool)
+        return;
+      if (newShortcut.lessModifiersThan(prevShortcut))
+        return;
+      if (prevShortcut.scancode() != kKeyNil && newShortcut.unicodeChar() == kKeyNil)
+        return;
+      if (prevShortcut.unicodeChar() != 0 && newShortcut.unicodeChar() == 0)
+        return;
+      if (prevShortcut.mouseButton() != kButtonNone && newShortcut.mouseButton() == kButtonNone)
+        return;
+    }
+
+    atm->newQuickToolSelectedFromEditor(newQuicktool, newShortcut);
   }
 }
 
@@ -1812,7 +1868,7 @@ void Editor::updateToolLoopModifiersIndicators(const bool firstFromMouseDown)
         // square-aspect/rotation/etc. only when the user presses the
         // modifier key again in the ToolLoop (and not before starting
         // the loop). So Alt+selection will add a selection, but
-        // willn't start the square-aspect until we press Alt key
+        // won't start the square-aspect until we press Alt key
         // again, or Alt+Shift+selection tool will subtract the
         // selection but will not start the rotation until we release
         // and press the Alt key again.
@@ -1825,6 +1881,8 @@ void Editor::updateToolLoopModifiersIndicators(const bool firstFromMouseDown)
             modifiers |= int(tools::ToolLoopModifiers::kFromCenter);
           if (int(action & KeyAction::RotateShape))
             modifiers |= int(tools::ToolLoopModifiers::kRotateShape);
+          if (int(action & KeyAction::CornerRadius))
+            modifiers |= int(tools::ToolLoopModifiers::kCornerRadius);
         }
       }
 
@@ -2020,6 +2078,23 @@ void Editor::showUnhandledException(const std::exception& ex, const ui::Message*
                  (state ? typeid(*state).name() : "None"));
 }
 
+void Editor::makeSelectionToolMask()
+{
+  m_selectionToolMask = std::make_unique<Mask>();
+  m_selectionToolMaskBoundaries = std::make_unique<MaskBoundaries>();
+}
+
+void Editor::deleteSelectionToolMask()
+{
+  m_selectionToolMask.reset();
+  m_selectionToolMaskBoundaries.reset();
+}
+
+bool Editor::hasSelectionToolMask()
+{
+  return m_selectionToolMask && !m_selectionToolMask->isEmpty();
+}
+
 //////////////////////////////////////////////////////////////////////
 // Message handler for the editor
 
@@ -2062,7 +2137,7 @@ bool Editor::onProcessMessage(Message* msg)
       // editor edge (MouseLeave/Enter)
       if (!hasCapture()) {
         updateToolLoopModifiersIndicators();
-        updateQuicktool();
+        updateQuicktool(msg);
       }
       break;
 
@@ -2099,7 +2174,7 @@ bool Editor::onProcessMessage(Message* msg)
         }
 
         updateToolLoopModifiersIndicators();
-        updateQuicktool();
+        updateQuicktool(msg);
         setCursor(mouseMsg->position());
 
         App::instance()->activeToolManager()->pressButton(pointer_from_msg(this, mouseMsg));
@@ -2144,7 +2219,7 @@ bool Editor::onProcessMessage(Message* msg)
           m_secondaryButton = false;
 
           updateToolLoopModifiersIndicators();
-          updateQuicktool();
+          updateQuicktool(msg);
           setCursor(mouseMsg->position());
 
           // In case we didn't hide the BrushPreview on the
@@ -2235,7 +2310,7 @@ bool Editor::onProcessMessage(Message* msg)
         if (hasMouse()) {
           updateToolLoopModifiersIndicators();
           updateAutoCelGuides(msg);
-          updateQuicktool();
+          updateQuicktool(msg);
           setCursor(mousePosInDisplay());
         }
 
@@ -2252,7 +2327,7 @@ bool Editor::onProcessMessage(Message* msg)
         if (hasMouse()) {
           updateToolLoopModifiersIndicators();
           updateAutoCelGuides(msg);
-          updateQuicktool();
+          updateQuicktool(msg);
           setCursor(mousePosInDisplay());
         }
 
@@ -2379,7 +2454,7 @@ void Editor::onPaint(ui::PaintEvent& ev)
       // Draw the sprite in the editor
       renderChrono.reset();
       drawBackground(g);
-      drawSpriteUnclippedRect(g, gfx::Rect(0, 0, m_sprite->width(), m_sprite->height()));
+      drawSpriteUnclippedRect(g, m_sprite->bounds());
       renderElapsed = renderChrono.elapsed();
 
 #if ENABLE_DEVMODE
@@ -2856,7 +2931,7 @@ void Editor::pasteImage(const Image* image, const Mask* mask, const gfx::Point* 
   position ? mask2.setOrigin(position->x, position->y) : mask2.setOrigin(x, y);
 
   PixelsMovementPtr pixelsMovement(
-    new PixelsMovement(UIContext::instance(), site, image, &mask2, "Paste"));
+    new PixelsMovement(UIContext::instance(), site, image, &mask2, "Paste", &m_tiledModeHelper));
 
   setState(EditorStatePtr(new MovingPixelsState(this, NULL, pixelsMovement, NoHandle)));
 }

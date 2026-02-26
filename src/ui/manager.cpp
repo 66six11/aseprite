@@ -652,16 +652,20 @@ void Manager::handleMouseDown(Display* display,
   if (!handleWindowZOrder())
     return;
 
-  enqueueMessage(newMouseMessage(kMouseDownMessage,
-                                 display,
-                                 (capture_widget ? capture_widget : mouse_widget),
-                                 mousePos,
-                                 pointerType,
-                                 mouseButton,
-                                 modifiers,
-                                 gfx::Point(0, 0),
-                                 false,
-                                 pressure));
+  std::unique_ptr<MouseMessage> mouseMsg(
+    newMouseMessage(kMouseDownMessage,
+                    display,
+                    (capture_widget ? capture_widget : mouse_widget),
+                    mousePos,
+                    pointerType,
+                    mouseButton,
+                    modifiers,
+                    gfx::Point(0, 0),
+                    false,
+                    pressure));
+
+  if (onEnqueueMouseDown(mouseMsg.get()))
+    enqueueMessage(mouseMsg.release());
 }
 
 void Manager::handleMouseUp(Display* display,
@@ -787,7 +791,7 @@ bool Manager::handleWindowZOrder()
   }
 
   // Put the focus
-  setFocus(mouse_widget);
+  setFocus(mouse_widget, FocusMessage::Source::Mouse);
   return true;
 }
 
@@ -954,7 +958,7 @@ Widget* Manager::getCapture()
   return capture_widget;
 }
 
-void Manager::setFocus(Widget* widget)
+void Manager::setFocus(Widget* widget, FocusMessage::Source source)
 {
   if ((focus_widget != widget) &&
       (!(widget) || (!(widget->hasFlags(DISABLED)) && !(widget->hasFlags(HIDDEN)) &&
@@ -964,7 +968,7 @@ void Manager::setFocus(Widget* widget)
 
     // Fetch the focus
     if (focus_widget && focus_widget != commonAncestor) {
-      auto* msg = new FocusMessage(kFocusLeaveMessage, oldFocus, widget);
+      auto* msg = new FocusMessage(kFocusLeaveMessage, oldFocus, widget, source);
       msg->setRecipient(focus_widget);
       msg->setPropagateToParent(true);
       msg->setCommonAncestor(commonAncestor);
@@ -981,7 +985,7 @@ void Manager::setFocus(Widget* widget)
     // Put the focus
     focus_widget = widget;
     if (widget) {
-      auto* msg = new FocusMessage(kFocusEnterMessage, oldFocus, widget);
+      auto* msg = new FocusMessage(kFocusEnterMessage, oldFocus, widget, source);
       msg->setRecipient(widget);
       msg->setPropagateToParent(true);
       msg->setCommonAncestor(commonAncestor);
@@ -1103,14 +1107,14 @@ void Manager::attractFocus(Widget* widget)
 
   // If magnetic widget exists and it doesn't have the focus
   if (magnet && !magnet->hasFocus())
-    setFocus(magnet);
+    setFocus(magnet, FocusMessage::Source::Window);
 }
 
 void Manager::focusFirstChild(Widget* widget)
 {
   for (Widget* it = widget->window(); it; it = next_widget(it)) {
     if (does_accept_focus(it) && !(child_accept_focus(it, true))) {
-      setFocus(it);
+      setFocus(it, FocusMessage::Source::Window);
       break;
     }
   }
@@ -1847,6 +1851,11 @@ void Manager::onNewDisplayConfiguration(Display* display)
   container->flushRedraw();
 }
 
+bool Manager::onEnqueueMouseDown(MouseMessage* mouseMsg)
+{
+  return true;
+}
+
 void Manager::onSizeHint(SizeHintEvent& ev)
 {
   int w = 0, h = 0;
@@ -2270,16 +2279,16 @@ Widget* Manager::findMagneticWidget(Widget* widget)
 }
 
 // static
-Message* Manager::newMouseMessage(MessageType type,
-                                  Display* display,
-                                  Widget* widget,
-                                  const gfx::Point& mousePos,
-                                  PointerType pointerType,
-                                  MouseButton button,
-                                  KeyModifiers modifiers,
-                                  const gfx::Point& wheelDelta,
-                                  bool preciseWheel,
-                                  float pressure)
+MouseMessage* Manager::newMouseMessage(MessageType type,
+                                       Display* display,
+                                       Widget* widget,
+                                       const gfx::Point& mousePos,
+                                       PointerType pointerType,
+                                       MouseButton button,
+                                       KeyModifiers modifiers,
+                                       const gfx::Point& wheelDelta,
+                                       bool preciseWheel,
+                                       float pressure)
 {
 #ifdef __APPLE__
   // Convert Ctrl+left click -> right-click
@@ -2290,14 +2299,14 @@ Message* Manager::newMouseMessage(MessageType type,
   }
 #endif
 
-  Message* msg = new MouseMessage(type,
-                                  pointerType,
-                                  button,
-                                  modifiers,
-                                  mousePos,
-                                  wheelDelta,
-                                  preciseWheel,
-                                  pressure);
+  auto* msg = new MouseMessage(type,
+                               pointerType,
+                               button,
+                               modifiers,
+                               mousePos,
+                               wheelDelta,
+                               preciseWheel,
+                               pressure);
 
   if (display)
     msg->setDisplay(display);
@@ -2438,7 +2447,7 @@ bool Manager::processFocusMovementMessage(Message* msg)
     }
 
     if ((focus) && (focus != focus_widget))
-      setFocus(focus);
+      setFocus(focus, FocusMessage::Source::Keyboard);
   }
 
   return ret;
